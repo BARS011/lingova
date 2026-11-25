@@ -912,25 +912,62 @@ EXTENDED_POOL = [
 ]
 
 def get_target_lesson_count(duration: str) -> int:
-    d = str(duration).lower().strip()
-    if "2_month" in d or "2 oy" in d: return 40
-    elif "3_month" in d or "3 oy" in d: return 60
-    elif "4_month" in d or "4 oy" in d: return 80
-    elif "5_month" in d or "5 oy" in d: return 100
-    elif "6_month" in d or "6 oy" in d: return 120
-    elif "1_year" in d or "1 yil" in d: return 240
+    """Onboarding variantlari (1_month, 2_months, ...) bilan mos dars soni."""
+    import re
+
+    d = str(duration or "1_month").lower().strip().replace(" ", "_")
+    match = re.search(r"(\d+)", d)
+    if match:
+        months = int(match.group(1))
+        if "yil" in d or "year" in d:
+            return months * 240
+        if "oy" in d or "month" in d:
+            return months * 20
     return 20
 
-def generate_curriculum(level="intermediate", purpose="abroad", duration="1_month"):
+PURPOSE_CONTEXT = {
+    "abroad": "Sayohat va chet el muloqoti",
+    "career": "Ish intervyusi va professional muloqot",
+    "it": "IT va xalqaro texnik jamoa",
+    "study": "IELTS / CEFR imtihon tayyorgarligi"
+}
+LEVEL_CONTEXT = {
+    "beginner": "Boshlang'ich daraja: oddiy gaplar va asosiy qoidalar bilan chiqamiz.",
+    "intermediate": "O'rtacha daraja: tabiiy iboralar va mustaqil fikr bildirishga e'tibor beramiz.",
+    "advanced": "Ilg'or daraja: murakkab tuzilmalar, akademik va professional uslub ishlatiladi."
+}
+FOCUS_CONTEXT = {
+    "speaking": "Ravon muloqotga ustunlik beriladi.",
+    "grammar": "Grammatika formulasi va xato tahlili batafsil beriladi.",
+    "vocabulary": "Mavzuga oid lug'at va kontekstli misollar ko'paytiriladi.",
+    "exam": "Imtihon strategiyasi va baholash mezonlari qo'shiladi."
+}
+
+
+def _personal_context(level, purpose, focus):
+    return " ".join([
+        PURPOSE_CONTEXT.get(purpose, PURPOSE_CONTEXT["abroad"]),
+        LEVEL_CONTEXT.get(level, LEVEL_CONTEXT["intermediate"]),
+        FOCUS_CONTEXT.get(focus, FOCUS_CONTEXT["speaking"])
+    ])
+
+
+def generate_curriculum(level="intermediate", purpose="abroad", duration="1_month", focus="speaking"):
     count = get_target_lesson_count(duration)
     lessons = []
     base_pool = list(ABROAD_LESSONS)
+    context = _personal_context(level, purpose, focus)
 
     for idx, item in enumerate(base_pool[:min(count, len(base_pool))]):
         lesson_data = dict(item)
+        grammar = dict(item.get("grammar_detailed", {}))
+        grammar["simple_explanation"] = f"{grammar.get('simple_explanation', '')} Shaxsiy yo'nalish: {context}"
+        lesson_data["grammar_detailed"] = grammar
         lesson_data["id"] = idx + 1
         lesson_data["title"] = f"{idx + 1}-dars: {item['topic']}"
         lesson_data["xp_reward"] = 25 + (idx * 2)
+        lesson_data["difficulty"] = "easy" if level == "beginner" else "hard" if level == "advanced" else item.get("difficulty", "medium")
+        lesson_data["tier_required"] = "free" if idx < 5 else "pro" if idx < 15 else "premium"
         lessons.append(lesson_data)
 
     if count > len(lessons):
@@ -949,13 +986,14 @@ def generate_curriculum(level="intermediate", purpose="abroad", duration="1_mont
                 "topic": topic_name,
                 "icon": icon,
                 "category": cat,
-                "difficulty": diff,
+                "difficulty": "hard" if level == "advanced" else "easy" if level == "beginner" else diff,
                 "diamonds_reward": diamonds_count,
+                "tier_required": "free" if i < 5 else "pro" if i < 15 else "premium",
                 "grammar_detailed": {
                     "title": f"Spoken Grammar: {gram_desc}",
                     "why_use": f"{topic_name} vaziyatida to'g'ri va ishonchli gapirish uchun muhim qoida.",
                     "formula": "Spoken Pattern: Ega + Fe'l + Aniq maqsad",
-                    "simple_explanation": f"{topic_name} bo'yicha chet elliklar bilan muloqot qilganda o'z fikringizni aniq va xatosiz yetkazish usuli.",
+                    "simple_explanation": f"{topic_name} bo'yicha chet elliklar bilan muloqot qilganda o'z fikringizni aniq va xatosiz yetkazish usuli. Shaxsiy yo'nalish: {context}",
                     "phonetic_trans": "[ˈfluː.ənt ˈspiːtʃ] - Flyuent spiich",
                     "examples": [
                         {

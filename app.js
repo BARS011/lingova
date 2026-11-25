@@ -32,16 +32,25 @@ let currentUser = null;
 let currentToken = null;
 let currentCurriculum = [];
 let activeLesson = null;
-let activeLessonTab = "grammar"; // 'grammar' | 'vocab' | 'dialogue' | 'quiz'
+let activeLessonTab = "case"; // 'case' | 'grammar' | 'vocab' | 'dialogue' | 'quiz' | 'reflection'
 let activeQuizIndex = 0;
+let quizAdvanceTimer = null;
 let soundEnabled = true;
+
+function clearQuizAdvanceTimer() {
+  if (quizAdvanceTimer !== null) {
+    clearTimeout(quizAdvanceTimer);
+    quizAdvanceTimer = null;
+  }
+}
 
 // Onboarding ma'lumotlari
 let onboardingData = {
   purpose: "abroad",
   level: "intermediate",
   duration: "1_month",
-  daily_minutes: 20
+  daily_minutes: 20,
+  focus: "speaking"
 };
 
 // ======================= 2. Tabiiy Ovoz (TTS) & Web Audio =======================
@@ -212,10 +221,18 @@ async function checkApiHealth() {
     const res = await fetch(`${API_BASE}/leaderboard`, { method: "GET", mode: "cors" });
     if (res.ok) {
       IS_API_ONLINE = true;
+      try {
+        const statusRes = await fetch(`${API_BASE}/ai/status`, { method: "GET", mode: "cors" });
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          window.LINGOVA_SERVER_GEMINI = !!(status && status.server_key);
+        }
+      } catch (e) {}
       return true;
     }
   } catch (e) {}
   IS_API_ONLINE = false;
+  window.LINGOVA_SERVER_GEMINI = false;
   return false;
 }
 
@@ -419,20 +436,26 @@ const EXTENDED_TOPIC_POOL = [
   { topic: "Muzokaralar va murosaga kelish", icon: "🤝", category: "Muzokara", desc: "Win-win solutions and deals" }
 ];
 
-// Darslar sonini hisoblash
+// Darslar sonini hisoblash (oldindan tayyorlangan variantlar banki bilan mos)
 function getLessonCountForDuration(duration) {
-  const d = String(duration).toLowerCase();
-  if (d.includes("2_month") || d.includes("2 oy")) return 40;
-  if (d.includes("3_month") || d.includes("3 oy")) return 60;
-  if (d.includes("4_month") || d.includes("4 oy")) return 80;
-  if (d.includes("5_month") || d.includes("5 oy")) return 100;
-  if (d.includes("6_month") || d.includes("6 oy")) return 120;
-  if (d.includes("1_year") || d.includes("1 yil")) return 240;
-  return 20; // 1 oylik reja
+  if (typeof window !== "undefined" && typeof window.CVGetLessonCount === "function") {
+    return window.CVGetLessonCount(duration);
+  }
+  const d = String(duration || "").toLowerCase().replace(/\s+/g, "_");
+  const match = d.match(/(\d+)/);
+  const months = match ? parseInt(match[1], 10) : 1;
+  if (/yil|year/.test(d)) return months * 240;
+  if (/oy|month/.test(d)) return months * 20;
+  return 20;
 }
 
-// SHAXSIY DASTUR TUZUVCHI ASOSIY FUNKSIYA (Bug to'g'irlandi!)
-function buildPersonalizedCurriculum(level = "intermediate", purpose = "abroad", duration = "1_month") {
+// Shaxsiy dastur: maqsad × daraja × diqqat markazi bo'yicha oldindan tayyor bankdan olinadi
+function buildPersonalizedCurriculum(level = "intermediate", purpose = "abroad", duration = "1_month", focus = "speaking") {
+  if (typeof window !== "undefined" && typeof window.CVBuildCurriculum === "function") {
+    return window.CVBuildCurriculum(level, purpose, duration, focus);
+  }
+
+  // Zaxira: curriculum.js yuklanmagan taqdirda ham asosiy darslar ishlaydi
   const count = getLessonCountForDuration(duration);
   const lessons = [];
 
@@ -547,15 +570,17 @@ async function handleRegister(username, email, password, fullName, avatar, gende
 
   currentUser = newUser;
   currentToken = "token_" + Date.now();
-  saveCurrentUser();
 
   if (IS_API_ONLINE) {
-    await apiRequest("/register", "POST", {
+    const res = await apiRequest("/register", "POST", {
       username: cleanU, email: cleanE, password, full_name: fullName,
       avatar, gender, age: parseInt(age), job
     });
+    // Backend bergan token keyinroq /onboarding va boshqa API lar uchun ishlatiladi.
+    if (res && res.token) currentToken = res.token;
   }
 
+  saveCurrentUser();
   return { success: true, user: currentUser };
 }
 
@@ -572,8 +597,13 @@ async function handleLogin(identifier, password) {
   currentUser = found;
   if (!currentUser.tier) currentUser.tier = "free";
   currentToken = "token_" + Date.now();
-  saveCurrentUser();
 
+  if (IS_API_ONLINE) {
+    const res = await apiRequest("/login", "POST", { identifier: ident, password });
+    if (res && res.token) currentToken = res.token;
+  }
+
+  saveCurrentUser();
   return { success: true, user: currentUser };
 }
 
@@ -795,8 +825,60 @@ function renderOnboarding(step = 1) {
 
       <div style="display: flex; gap: 12px;">
         <button class="btn btn-secondary" onclick="renderOnboarding(2)">← Orqaga</button>
+        <button class="btn btn-primary btn-full" onclick="renderOnboarding(4)">Dars uslubini tanlash →</button>
+      </div>
+    `;
+  } else if (step === 4) {
+    const purposeLabel = { abroad: "Sayohat", career: "Karyera", it: "IT", study: "IELTS / CEFR" }[onboardingData.purpose] || "Sayohat";
+    const levelLabel = { beginner: "A1–A2", intermediate: "B1–B2", advanced: "C1 Master" }[onboardingData.level] || "B1–B2";
+    stepContent = `
+      <h2 style="font-size: 22px; font-weight: 800; margin-bottom: 6px;">Oxirgi savol: qaysi ko'nikmaga e'tibor qaratamiz?</h2>
+      <p style="color: var(--text-secondary); font-size: 14.5px; margin-bottom: 20px;">
+        Javobingiz darslar tartibi, grammatika tushuntirishi va mashqlar turini belgilaydi. Darslar case-method va Sokratik savollar asosida tuzilgan; barcha variantlar oldindan tayyorlangan — natija darhol chiqadi.
+      </p>
+
+      <div class="choices-grid focus-choices">
+        <div class="choice-card ${onboardingData.focus === 'speaking' ? 'selected' : ''}" onclick="selectOnboarding('focus', 'speaking', this)">
+          <div class="choice-icon">🗣️</div>
+          <div class="choice-title">Ravon muloqot</div>
+          <div class="choice-desc">Jonli dialoglar va kundalik iboralar birinchi o'rinda</div>
+        </div>
+        <div class="choice-card ${onboardingData.focus === 'grammar' ? 'selected' : ''}" onclick="selectOnboarding('focus', 'grammar', this)">
+          <div class="choice-icon">📐</div>
+          <div class="choice-title">Grammatika asosi</div>
+          <div class="choice-desc">Formula, xato tahlili va qoidalar bilan chuqur mashq</div>
+        </div>
+        <div class="choice-card ${onboardingData.focus === 'vocabulary' ? 'selected' : ''}" onclick="selectOnboarding('focus', 'vocabulary', this)">
+          <div class="choice-icon">📚</div>
+          <div class="choice-title">Boy lug'at</div>
+          <div class="choice-desc">Mavzuga oid so'zlar, IPA va kontekstli misollar</div>
+        </div>
+        <div class="choice-card ${onboardingData.focus === 'exam' ? 'selected' : ''}" onclick="selectOnboarding('focus', 'exam', this)">
+          <div class="choice-icon">🎯</div>
+          <div class="choice-title">Imtihon tayyorgarligi</div>
+          <div class="choice-desc">IELTS / CEFR strategiyalari va baholash mezonlari</div>
+        </div>
+      </div>
+
+      <div class="onboarding-minutes-row">
+        <div>
+          <div style="font-weight: 800; font-size: 14px;">Kunlik mashg'ulot vaqti</div>
+          <div style="font-size: 12.5px; color: var(--text-muted);">Rejangiz shu vaqtga mos ravishda tuziladi.</div>
+        </div>
+        <select class="trans-lang-select" onchange="onboardingData.daily_minutes = Number(this.value); updateOnboardingPreview();">
+          <option value="10" ${onboardingData.daily_minutes === 10 ? 'selected' : ''}>10 daqiqa / kun</option>
+          <option value="20" ${onboardingData.daily_minutes === 20 ? 'selected' : ''}>20 daqiqa / kun</option>
+          <option value="30" ${onboardingData.daily_minutes === 30 ? 'selected' : ''}>30 daqiqa / kun</option>
+          <option value="45" ${onboardingData.daily_minutes === 45 ? 'selected' : ''}>45 daqiqa / kun</option>
+        </select>
+      </div>
+
+      <div id="onboardingPreview" class="onboarding-preview"></div>
+
+      <div style="display: flex; gap: 12px;">
+        <button class="btn btn-secondary" onclick="renderOnboarding(3)">← Orqaga</button>
         <button class="btn btn-primary btn-full" id="finishOnboardBtn" onclick="finishOnboarding(this)">
-          Shaxsiy Darslarni Yaratish va Boshlash 🚀
+          ${purposeLabel} · ${levelLabel} — Darslarni yaratish 🚀
         </button>
       </div>
     `;
@@ -805,14 +887,19 @@ function renderOnboarding(step = 1) {
   appEl.innerHTML = `
     ${renderHeader('roadmap')}
     <div class="onboarding-wrap card animate-fade">
-      <div class="step-indicator">
-        <div class="step-dot ${step >= 1 ? 'active' : ''} ${step > 1 ? 'done' : ''}"></div>
-        <div class="step-dot ${step >= 2 ? 'active' : ''} ${step > 2 ? 'done' : ''}"></div>
-        <div class="step-dot ${step >= 3 ? 'active' : ''}"></div>
+      <div class="onboarding-topline">
+        <span>SHAXSIY REJA</span>
+        <span>4 bosqich · taxminan 30 soniya</span>
       </div>
+      <div class="step-indicator">
+        ${[1, 2, 3, 4].map(n => `<div class="step-dot ${step >= n ? 'active' : ''} ${step > n ? 'done' : ''}"></div>`).join('')}
+      </div>
+      <div class="step-caption">${step} / 4 bosqich</div>
       ${stepContent}
     </div>
   `;
+
+  updateOnboardingPreview();
 }
 
 function selectOnboarding(key, val, el) {
@@ -820,6 +907,33 @@ function selectOnboarding(key, val, el) {
   onboardingData[key] = val;
   el.parentElement.querySelectorAll(".choice-card").forEach(c => c.classList.remove("selected"));
   el.classList.add("selected");
+  updateOnboardingPreview();
+}
+
+function updateOnboardingPreview() {
+  const box = document.getElementById("onboardingPreview");
+  if (!box || typeof window === "undefined") return;
+
+  if (typeof window.CVVariantSummary !== "function") {
+    box.innerHTML = `<span>✅ ${escapeHtml(onboardingData.purpose)} · ${escapeHtml(onboardingData.level)} · ${getLessonCountForDuration(onboardingData.duration)} ta dars tayyorlanadi</span>`;
+    return;
+  }
+
+  const s = window.CVVariantSummary(onboardingData.purpose, onboardingData.level, onboardingData.focus, onboardingData.duration);
+  box.innerHTML = `
+    <div class="preview-icon">🧠</div>
+    <div>
+      <div class="preview-title">Harvard uslubidagi shaxsiy variant topildi</div>
+      <div class="preview-meta">
+        <span>🏛️ Case Method</span>
+        <span>${s.lesson_count} ta dars</span>
+        <span>${s.topic_count} ta mavzu</span>
+        <span>${s.grammar_count} ta grammatika qoidasi</span>
+        <span>${escapeHtml(s.focus_label)}</span>
+        <span>${onboardingData.daily_minutes} daqiqa / kun</span>
+      </div>
+    </div>
+  `;
 }
 
 async function finishOnboarding(btn) {
@@ -828,12 +942,19 @@ async function finishOnboarding(btn) {
   btn.innerText = "Darslar tuzilmoqda...";
 
   try {
-    // 1. Shaxsiy darslar yo'l xaritasini hosil qilish
-    const lessons = buildPersonalizedCurriculum(onboardingData.level, onboardingData.purpose, onboardingData.duration);
+    // 1. Oldindan tayyorlangan variantdan shaxsiy darslar yo'l xaritasini olish
+    const lessons = buildPersonalizedCurriculum(
+      onboardingData.level,
+      onboardingData.purpose,
+      onboardingData.duration,
+      onboardingData.focus
+    );
 
     currentUser.level = onboardingData.level;
     currentUser.purpose = onboardingData.purpose;
     currentUser.duration = onboardingData.duration;
+    currentUser.focus = onboardingData.focus;
+    currentUser.daily_minutes = onboardingData.daily_minutes;
     currentUser.curriculum = lessons;
     currentCurriculum = lessons;
 
@@ -855,6 +976,7 @@ async function finishOnboarding(btn) {
 
 // ======================= 8. Darslar Yo'l Xaritasi (Roadmap View) =======================
 function renderRoadmap() {
+  clearQuizAdvanceTimer();
   if (!currentUser) return renderAuthScreen();
 
   if (!currentCurriculum || currentCurriculum.length === 0) {
@@ -869,6 +991,9 @@ function renderRoadmap() {
   const completedCount = currentCurriculum.filter(l => l.is_completed || (currentUser.completed_lessons && currentUser.completed_lessons[l.id])).length;
   const progressPercent = Math.round((completedCount / currentCurriculum.length) * 100);
   const userTier = currentUser.tier || "free";
+  const variantInfo = (typeof window !== "undefined" && typeof window.CVVariantSummary === "function")
+    ? window.CVVariantSummary(currentUser.purpose || "abroad", currentUser.level || "intermediate", currentUser.focus || "speaking", currentUser.duration || "1_month")
+    : null;
 
   let lessonsHtml = "";
   currentCurriculum.forEach(l => {
@@ -894,11 +1019,12 @@ function renderRoadmap() {
           ${isDone ? '✓' : l.icon || '📖'}
         </div>
         <div class="lesson-content">
-          <div class="lesson-tag">${escapeHtml(l.category || 'Muloqot')} · #${l.id}</div>
+          <div class="lesson-tag">${escapeHtml(l.category || 'Muloqot')} · #${l.id}${l.focus_label ? ` · ${escapeHtml(l.focus_label)}` : ''}</div>
           <div class="lesson-name">${escapeHtml(l.title)}</div>
           <div class="lesson-meta-chips">
-            <span>📝 Grammatika & Ovoz</span>
-            <span>💎 +${l.diamonds_reward || 2} Olmos</span>
+            <span>📐 ${escapeHtml((l.grammar && l.grammar.title || 'Grammatika').split(':')[0])}</span>
+            <span>🗣️ ${(l.dialogue || []).length} replika</span>
+            <span>💎 +${l.diamonds_reward || 2}</span>
             <span>⭐ +${l.xp_reward || 30} XP</span>
           </div>
         </div>
@@ -925,8 +1051,18 @@ function renderRoadmap() {
       <h1 class="hero-title">Shaxsiy O'quv Dasturingiz 🎯</h1>
       <p class="hero-desc">
         Sizning maqsadingizga qarab ${currentCurriculum.length} ta darslikdan iborat tizimli yo'nalish shakllantirildi. 
-        Har bir darsda audio talaffuz, grammatik formula va interaktiv mashqlar mavjud.
+        Har bir dars Harvard uslubidagi case tahlili, Sokratik savollar, grammatika, audio talaffuz, jonli dialog, mashq va refleksiya bosqichlaridan iborat.
       </p>
+
+      ${variantInfo ? `
+        <div class="variant-chips">
+          <span class="variant-chip">🎯 ${escapeHtml(variantInfo.focus_label)}</span>
+          <span class="variant-chip">📚 ${variantInfo.topic_count} ta mavzu</span>
+          <span class="variant-chip">📐 ${variantInfo.grammar_count} ta qoida</span>
+          <span class="variant-chip">🏛️ Harvard uslubi</span>
+          <span class="variant-chip">⚡ Oldindan tayyor</span>
+        </div>
+      ` : ''}
 
       <div class="hero-stats-grid">
         <div class="hero-stat-card">
@@ -970,6 +1106,7 @@ function renderRoadmap() {
 // ======================= 9. Darsni Ochish (Lesson Viewer) =======================
 function openLesson(lessonId) {
   playSound('click');
+  clearQuizAdvanceTimer();
   const lesson = currentCurriculum.find(l => l.id === lessonId);
   if (!lesson) return;
 
@@ -985,30 +1122,248 @@ function openLesson(lessonId) {
   }
 
   activeLesson = lesson;
-  activeLessonTab = "grammar";
+  activeLessonTab = "case";
   activeQuizIndex = 0;
   renderLessonView();
+}
+
+/* Harvard uslubidagi case ma'lumotlarini olish (eski darslar uchun ham ishlaydi). */
+function getLessonCase(lesson) {
+  const generated = (typeof window !== "undefined" && typeof window.CVBuildCase === "function")
+    ? window.CVBuildCase(lesson || {})
+    : null;
+  return Object.assign({}, generated || {}, (lesson && lesson.case) || {});
+}
+
+function getLessonReflection(lesson) {
+  if (lesson && Array.isArray(lesson.reflection) && lesson.reflection.length) return lesson.reflection;
+  const c = getLessonCase(lesson);
+  return [
+    `Qarorimni qanday asosladim? ${c.takeaway || ""}`.trim(),
+    ...(c.reflection || []),
+    "Bugungi qoidani yangi gapda qo‘llab ko‘ring."
+  ];
+}
+
+function reflectionStorageKey() {
+  return `lingova_reflection_${activeLesson ? activeLesson.id : 0}`;
+}
+
+function getSavedReflections() {
+  try {
+    return JSON.parse(localStorage.getItem(reflectionStorageKey()) || "{}");
+  } catch (e) {
+    return {};
+  }
+}
+
+function countWords(text) {
+  return String(text || "").trim().split(/\s+/).filter(Boolean).length;
+}
+
+function saveCaseDecision() {
+  if (!activeLesson) return;
+  const input = document.getElementById("caseDecisionInput");
+  if (!input) return;
+  const all = getSavedReflections();
+  all.case_decision = input.value;
+  try { localStorage.setItem(reflectionStorageKey(), JSON.stringify(all)); } catch (e) {}
+}
+
+function saveReflectionDraft(idx) {
+  if (!activeLesson) return;
+  const el = document.getElementById(`reflection_${idx}`);
+  if (!el) return;
+  const all = getSavedReflections();
+  all[`prompt_${idx}`] = el.value;
+  try { localStorage.setItem(reflectionStorageKey(), JSON.stringify(all)); } catch (e) {}
+  const counter = document.getElementById(`reflectionCount_${idx}`);
+  if (counter) counter.textContent = `${countWords(el.value)} so‘z`;
+}
+
+function toggleCaseHint(idx) {
+  const box = document.getElementById(`caseHint_${idx}`);
+  const btn = document.getElementById(`caseHintBtn_${idx}`);
+  if (!box) return;
+  const open = box.style.display !== "none";
+  box.style.display = open ? "none" : "block";
+  if (btn) btn.textContent = open ? "💡 Ko‘rsat" : "🙈 Yashir";
+}
+
+function toggleCaseAnswer() {
+  const box = document.getElementById("caseModelAnswer");
+  const btn = document.getElementById("caseModelBtn");
+  if (!box) return;
+  const open = box.style.display !== "none";
+  box.style.display = open ? "none" : "block";
+  if (btn) btn.textContent = open ? "Namunaviy asosni ko‘rish" : "Namunaviy asosni yashirish";
+}
+
+function reflectionRubric() {
+  return [
+    "Vaziyatdagi manfaatdor tomonlarni aniqladim",
+    "Qarorimni dalil va sabab bilan asosladim",
+    "Bugungi grammatika qoidasini yangi gapda qo‘lladim",
+    "Inglizcha javobimni ovoz chiqarib takrorladim"
+  ];
+}
+
+function reflectionRubricScore() {
+  const saved = getSavedReflections();
+  return reflectionRubric().filter((_, i) => saved[`rubric_${i}`] === true).length;
+}
+
+function saveRubricItem(idx, checked) {
+  if (!activeLesson) return;
+  const all = getSavedReflections();
+  all[`rubric_${idx}`] = !!checked;
+  try { localStorage.setItem(reflectionStorageKey(), JSON.stringify(all)); } catch (e) {}
+  const badge = document.getElementById("rubricScore");
+  if (badge) {
+    const score = reflectionRubricScore();
+    badge.textContent = `${score} / 4 tayyor`;
+    badge.style.color = score === 4 ? "var(--emerald)" : "var(--text-secondary)";
+  }
 }
 
 function renderLessonView() {
   const lesson = activeLesson;
   if (!lesson) return renderRoadmap();
 
+  // Backend darslaridagi eski maydon nomini ham qo'llab-quvvatlaymiz.
+  if (!lesson.grammar && lesson.grammar_detailed) lesson.grammar = lesson.grammar_detailed;
+
   let bodyContent = "";
 
-  if (activeLessonTab === "grammar") {
+  if (activeLessonTab === "case") {
+    const c = getLessonCase(lesson);
+    const saved = getSavedReflections();
+    const objectives = lesson.objectives && lesson.objectives.length
+      ? lesson.objectives
+      : [c.objective, "Asosiy tushunchani misol bilan tushuntirish", "Qarorini inglizcha asoslash"];
+    const prep = lesson.prep || {
+      read: `Vaziyatni o‘qing: ${c.title}`,
+      note: "Ikki muhim ma’lumotni yozib oling",
+      think: (c.socratic && c.socratic[0] && c.socratic[0].q) || ""
+    };
+
+    bodyContent = `
+      <div class="case-shell animate-fade">
+        <article class="case-brief">
+          <div class="case-eyebrow">
+            CASE ${String(lesson.id || 1).padStart(2, "0")} · ${escapeHtml(lesson.category || "Accounting")}
+          </div>
+          <h2 class="case-title">${escapeHtml(c.title || lesson.topic || "Vaziyat tahlili")}</h2>
+
+          <div class="method-ribbon">
+            <span>🏛️ ${escapeHtml(lesson.method || (typeof window !== "undefined" && window.CVMethodLabel) || "Harvard uslubi")}</span>
+            <span>${escapeHtml(lesson.method_note || "Sokratik savol-javob va qaror asoslash")}</span>
+          </div>
+
+          <div class="case-topic-line">
+            <span>Dars konteksti: <b>${escapeHtml(lesson.topic || c.lesson_topic || "")}</b></span>
+            <span>Qoida: <b>${escapeHtml((lesson.grammar && lesson.grammar.title) || c.rule_link || "")}</b></span>
+          </div>
+
+          <div class="academic-divider"></div>
+
+          <div class="case-block">
+            <div class="case-label">O‘QUV MAQSADLARI</div>
+            <ul class="objectives-list">
+              ${objectives.map(o => `<li>${escapeHtml(o)}</li>`).join("")}
+            </ul>
+          </div>
+
+          <div class="case-block">
+            <div class="case-label">VAZIYAT</div>
+            <p class="case-context">${escapeHtml(c.context || "")}</p>
+          </div>
+
+          <div class="stakeholder-row">
+            <span class="stakeholder-label">MANFAATDORLAR:</span>
+            ${(c.stakeholders || []).map(s => `<span class="stakeholder-chip">${escapeHtml(s)}</span>`).join("")}
+          </div>
+
+          <blockquote class="case-dilemma">
+            <span>ASOSIY DILEMMA</span>
+            ${escapeHtml(c.dilemma || "")}
+          </blockquote>
+
+          <div class="case-block">
+            <div class="case-label">QAROR DOIRASI</div>
+            <div class="case-framework">
+              ${(c.framework || []).map((step, i) => `
+                <div class="framework-step">
+                  <span class="framework-num">${i + 1}</span>
+                  <span>${escapeHtml(step)}</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+
+          <div class="case-block">
+            <div class="case-label">SOKRATIK SAVOLLAR</div>
+            <div class="socratic-list">
+              ${(c.socratic || []).map((item, i) => `
+                <div class="socratic-item">
+                  <div class="socratic-top">
+                    <div class="socratic-q"><b>S${i + 1}.</b> ${escapeHtml(item.q)}</div>
+                    <button class="btn btn-secondary btn-sm" id="caseHintBtn_${i}" onclick="toggleCaseHint(${i})">💡 Ko‘rsat</button>
+                  </div>
+                  <div class="socratic-hint" id="caseHint_${i}" style="display: none;">
+                    ${escapeHtml(item.hint || "")}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+
+          <div class="case-decision">
+            <div class="case-label">QARORINGIZ</div>
+            <p style="font-size: 14.5px; font-weight: 700; margin-bottom: 10px;">${escapeHtml(c.decision || "")}</p>
+            <textarea id="caseDecisionInput" class="case-textarea" rows="3"
+                      placeholder="Fikringizni yozing... Namunaviy javobni ko‘rishdan oldin o‘zingiz javob bering."
+                      oninput="saveCaseDecision()">${escapeHtml(saved.case_decision || "")}</textarea>
+            <button class="btn btn-secondary btn-sm" id="caseModelBtn" onclick="toggleCaseAnswer()" style="margin-top: 10px;">
+              Namunaviy asosni ko‘rish
+            </button>
+            <div class="case-model" id="caseModelAnswer" style="display: none;">
+              <b>Model javob:</b> ${escapeHtml(c.answer || "")}
+              <div style="margin-top: 6px; color: var(--text-secondary);">📌 ${escapeHtml(c.takeaway || "")}</div>
+            </div>
+          </div>
+
+          <div class="case-prep">
+            <div class="case-label">DERSDAN OLDIN / ISH CHIZMANGIZ</div>
+            <div><b>📖 O‘qing:</b> ${escapeHtml(prep.read)}</div>
+            <div><b>✍️ Yozing:</b> ${escapeHtml(prep.note)}</div>
+            <div><b>🤔 O‘ylang:</b> ${escapeHtml(prep.think)}</div>
+          </div>
+        </article>
+
+        <button class="btn btn-primary btn-full" onclick="switchLessonTab('grammar')">
+          Qoida va ish chizmasiga o‘tish →
+        </button>
+      </div>
+    `;
+  } else if (activeLessonTab === "grammar") {
     const g = lesson.grammar || {};
     bodyContent = `
       <div class="animate-fade">
         <div class="card" style="margin-bottom: 16px;">
-          <div class="card-title">📖 ${escapeHtml(g.title || 'Grammatika')}</div>
+          <div class="lesson-grammar-head">
+            <div class="card-title">📖 ${escapeHtml(g.title || 'Grammatika')}</div>
+            <span class="lesson-focus-chip">${escapeHtml(lesson.focus_label || 'Shaxsiy dars')}</span>
+          </div>
           <p style="color: var(--text-secondary); font-size: 14.5px; line-height: 1.6; margin-bottom: 16px;">
             ${escapeHtml(g.why_use || '')}
           </p>
 
-          <div style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.3); padding: 14px 18px; border-radius: var(--radius-md); font-weight: 700; font-size: 14.5px; color: #a5b4fc; margin-bottom: 16px;">
+          <div style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.3); padding: 14px 18px; border-radius: var(--radius-md); font-weight: 700; font-size: 14.5px; color: #a5b4fc; margin-bottom: 10px;">
             📐 FORMULA: ${escapeHtml(g.formula || '')}
           </div>
+
+          ${g.phonetic_trans ? `<div class="grammar-pron-row">${escapeHtml(g.phonetic_trans)}</div>` : ''}
 
           <p style="font-size: 14.5px; color: var(--text-primary); margin-bottom: 20px;">
             ${escapeHtml(g.simple_explanation || '')}
@@ -1061,6 +1416,7 @@ function renderLessonView() {
               </div>
 
               <div class="vocab-trans">👉 ${escapeHtml(v.trans)}</div>
+              ${v.tip ? `<div class="vocab-tip">💡 ${escapeHtml(v.tip)}</div>` : ''}
 
               ${v.ex ? `
                 <div class="vocab-example">
@@ -1095,6 +1451,7 @@ function renderLessonView() {
                   <button class="audio-btn" style="width: 26px; height: 26px; font-size: 11px;" onclick="speakText('${escapeQuotes(d.text)}')">🔊</button>
                 </div>
                 <div class="bubble-text">${escapeHtml(d.text)}</div>
+                ${d.pron ? `<div class="bubble-pron">🗣️ ${escapeHtml(d.pron)}</div>` : ''}
                 <div class="bubble-trans">${escapeHtml(d.uz)}</div>
               </div>
             `).join('')}
@@ -1139,6 +1496,71 @@ function renderLessonView() {
         </div>
       `;
     }
+  } else if (activeLessonTab === "reflection") {
+    const prompts = getLessonReflection(lesson);
+    const saved = getSavedReflections();
+    const c = getLessonCase(lesson);
+    const rubric = reflectionRubric();
+    const score = rubric.filter((_, i) => saved[`rubric_${i}`] === true).length;
+
+    bodyContent = `
+      <div class="reflection-shell animate-fade">
+        <article class="reflection-hero card">
+          <div class="case-eyebrow">POST-CLASS · REFLECTION</div>
+          <h2 class="case-title">Qaror qanday natija berdi?</h2>
+          <p style="color: var(--text-secondary); font-size: 14.5px; line-height: 1.65;">
+            Yozma refleksiya — universitet uslubidagi darsning yakuniy bosqichi. Fikringizni yozib, qaroringizni qayta ko‘rib chiqing va keyingi darsga o‘ting.
+          </p>
+          <div class="reflection-takeaway">
+            <span>Asosiy xulosa:</span> ${escapeHtml(c.takeaway || "Qaror asoslash orqali mustahkamlanadi.")}
+          </div>
+        </article>
+
+        <div class="reflection-grid">
+          <div class="card reflection-card">
+            <div class="case-label">REFLEKSIYA SAVOLLARI</div>
+            <div class="reflection-list">
+              ${prompts.map((p, i) => `
+                <div class="reflection-item">
+                  <div class="reflection-q"><b>${i + 1}.</b> ${escapeHtml(p)}</div>
+                  <textarea id="reflection_${i}" class="case-textarea" rows="2"
+                            placeholder="Javobingizni yozing..."
+                            oninput="saveReflectionDraft(${i})">${escapeHtml(saved[`prompt_${i}`] || "")}</textarea>
+                  <div class="reflection-count" id="reflectionCount_${i}">${countWords(saved[`prompt_${i}`] || "")} so‘z</div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+
+          <aside class="card rubric-card">
+            <div class="rubric-head">
+              <div>
+                <div class="case-label">O‘ZBAHOLASH RUBRIKASI</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">4 mezonning barchasini belgilang</div>
+              </div>
+              <span class="rubric-score" id="rubricScore" style="color: ${score === 4 ? 'var(--emerald)' : 'var(--text-secondary)'};">${score} / 4 tayyor</span>
+            </div>
+            <div class="rubric-list">
+              ${rubric.map((r, i) => `
+                <label class="rubric-item">
+                  <input type="checkbox" ${saved[`rubric_${i}`] === true ? 'checked' : ''}
+                         onchange="saveRubricItem(${i}, this.checked)">
+                  <span>${escapeHtml(r)}</span>
+                </label>
+              `).join("")}
+            </div>
+            <div class="rubric-note">
+              Baholash mezoni: vaziyatni tushunish, qaror asosi, grammatika va og‘zaki amaliyot.
+            </div>
+          </aside>
+        </div>
+
+        <div class="lesson-actions">
+          <button class="btn btn-secondary" onclick="switchLessonTab('quiz')">← Mashqlarga qaytish</button>
+          <button class="btn btn-primary btn-full" onclick="completeCurrentLesson()">Darsni yakunlash ✓</button>
+        </div>
+      </div>
+    `;
   }
 
   appEl.innerHTML = `
@@ -1154,17 +1576,23 @@ function renderLessonView() {
     </div>
 
     <div class="lesson-tabs-bar">
+      <button class="lesson-tab-btn ${activeLessonTab === 'case' ? 'active' : ''}" onclick="switchLessonTab('case')">
+        🏛️ Case tahlili
+      </button>
       <button class="lesson-tab-btn ${activeLessonTab === 'grammar' ? 'active' : ''}" onclick="switchLessonTab('grammar')">
-        📖 Grammatika & Qoida
+        📖 Grammatika
       </button>
       <button class="lesson-tab-btn ${activeLessonTab === 'vocab' ? 'active' : ''}" onclick="switchLessonTab('vocab')">
-        🗣️ Lug'at & Talaffuz
+        🗣️ Lug'at
       </button>
       <button class="lesson-tab-btn ${activeLessonTab === 'dialogue' ? 'active' : ''}" onclick="switchLessonTab('dialogue')">
-        💬 Jonli Dialog
+        💬 Dialog
       </button>
       <button class="lesson-tab-btn ${activeLessonTab === 'quiz' ? 'active' : ''}" onclick="switchLessonTab('quiz')">
-        ✍️ Mashq & Viktorina
+        ✍️ Mashq
+      </button>
+      <button class="lesson-tab-btn ${activeLessonTab === 'reflection' ? 'active' : ''}" onclick="switchLessonTab('reflection')">
+        🧠 Refleksiya
       </button>
     </div>
 
@@ -1176,6 +1604,7 @@ function renderLessonView() {
 
 function switchLessonTab(tab) {
   playSound('click');
+  clearQuizAdvanceTimer();
   activeLessonTab = tab;
   renderLessonView();
 }
@@ -1183,38 +1612,49 @@ function switchLessonTab(tab) {
 function handleQuizAnswer(selected, correct, diamondGain, btn) {
   const container = document.getElementById("quizOptionsContainer");
   const fb = document.getElementById("quizFeedback");
+  if (!container || !fb) return;
   container.querySelectorAll("button").forEach(b => b.disabled = true);
   fb.style.display = "block";
+
+  const qList = activeLesson.exercises || [];
+  const currentQuestion = qList[activeQuizIndex % Math.max(qList.length, 1)] || {};
+  const why = currentQuestion.why ? `<div class="quiz-why">💡 ${escapeHtml(currentQuestion.why)}</div>` : "";
 
   if (selected.trim().toLowerCase() === correct.trim().toLowerCase()) {
     playSound('correct');
     btn.classList.add("correct");
     fb.style.color = "var(--emerald)";
-    fb.innerHTML = `To'g'ri javob! 🎉 +${diamondGain} 💎 Olmos qo'shildi!`;
+    fb.innerHTML = `To'g'ri javob! 🎉 +${diamondGain} 💎 Olmos qo'shildi! ${why}`;
 
     currentUser.diamonds = (currentUser.diamonds || 0) + diamondGain;
     currentUser.xp = (currentUser.xp || 0) + 15;
     saveCurrentUser();
     showDiamondToast(diamondGain);
 
-    setTimeout(() => {
-      const qList = activeLesson.exercises || [];
+    clearQuizAdvanceTimer();
+    quizAdvanceTimer = setTimeout(() => {
+      quizAdvanceTimer = null;
       if (activeQuizIndex + 1 < qList.length) {
         activeQuizIndex++;
         renderLessonView();
       } else {
-        completeCurrentLesson();
+        switchLessonTab("reflection");
       }
-    }, 1400);
+    }, 1700);
   } else {
     playSound('wrong');
     btn.classList.add("wrong");
     fb.style.color = "var(--red)";
-    fb.innerHTML = `Noto'g'ri. To'g'ri javob: <b>${escapeHtml(correct)}</b>`;
+    fb.innerHTML = `Noto'g'ri. To'g'ri javob: <b>${escapeHtml(correct)}</b> ${why}`;
 
+    // Xato javobdan keyin dars yopilmaydi — o'quvchi qayta urinib ko'radi.
     setTimeout(() => {
-      completeCurrentLesson();
-    }, 2000);
+      container.querySelectorAll("button").forEach(b => {
+        b.disabled = false;
+        b.classList.remove("wrong");
+      });
+      fb.style.display = "none";
+    }, 2200);
   }
 }
 
@@ -1229,7 +1669,7 @@ function completeCurrentLesson() {
   saveCurrentUser();
   showDiamondToast(3);
 
-  alert(`Tabriklaymiz! "${activeLesson.title}" muvaffaqiyatli yakunlandi! 🎉\n+35 ⭐ XP va +3 💎 Olmos mukofoti berildi.`);
+  alert(`Tabriklaymiz! "${activeLesson.title}" muvaffaqiyatli yakunlandi! 🎉\n+${activeLesson.xp_reward || 35} ⭐ XP va +3 💎 Olmos mukofoti berildi.`);
   renderRoadmap();
 }
 
@@ -1250,8 +1690,42 @@ let transCurrentInput = "";
 let transCurrentResult = null;
 let transIsLoading = false;
 let transDebounceTimer = null;
+let transRequestId = 0;
+let transCache = new Map(); // tezkor takroriy so'rovlar uchun xotira keshi
 let transFavorites = JSON.parse(localStorage.getItem("lingova_fav_words") || "[]");
 let transHistory = JSON.parse(localStorage.getItem("lingova_trans_history") || "[]");
+
+function transCacheKey(text, src, tgt) {
+  return `${src || 'auto'}|${tgt || 'uz'}|${text.trim().toLowerCase()}`;
+}
+
+function transOfflineLookup(clean, src, tgt) {
+  const lower = clean.toLowerCase();
+  const item = EXTENSIVE_OFFLINE_DICT[lower];
+  if (!item) return null;
+  const trans = tgt === 'ru' && item.ru ? item.ru : (tgt === 'en' && item.en ? item.en : item.uz);
+  return {
+    success: true,
+    translated_text: trans,
+    source_lang: src === 'auto' ? 'en' : src,
+    target_lang: tgt,
+    ipa: item.ipa || '',
+    parts_of_speech: [{ pos: item.pos, synonyms: item.syn || [] }],
+    examples: item.ex || [],
+    cached: true,
+    instant: true
+  };
+}
+
+function rememberTranslation(text, src, tgt, result) {
+  if (!result || !result.translated_text) return;
+  transCache.set(transCacheKey(text, src, tgt), result);
+  if (transCache.size > 300) transCache.delete(transCache.keys().next().value);
+
+  const item = { text, result: { translated_text: result.translated_text }, date: Date.now() };
+  transHistory = [item].filter((x, i, arr) => arr.findIndex(y => y.text.toLowerCase() === x.text.toLowerCase()) === i).slice(0, 12);
+  try { localStorage.setItem("lingova_trans_history", JSON.stringify(transHistory)); } catch (e) {}
+}
 
 // Keng qamrovli oflayn lug'at va leksik ma'lumotlar bazasi
 const EXTENSIVE_OFFLINE_DICT = {
@@ -1287,7 +1761,8 @@ function renderTranslatorView() {
             Ingliz, rus va o'zbek tillaridagi barcha so'z va matnlarni aniq tarjima qiling. IPA transkripsiya, so'z turlari va audio talaffuz.
           </div>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center;">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <span class="trans-speed-badge">⚡ Tezkor kesh + parallel so'rov</span>
           <span class="tier-badge pro">PRO & PREMIUM ACTIVE</span>
         </div>
       </div>
@@ -1306,7 +1781,8 @@ function renderTranslatorView() {
           </div>
           <textarea id="transInput" class="trans-textarea" 
                     placeholder="So'z, ibora yoki murakkab matn kiriting (Inglizcha, Ruscha, O'zbekcha)..."
-                    oninput="handleLiveTranslation(this.value)">${escapeHtml(transCurrentInput)}</textarea>
+                    oninput="handleLiveTranslation(this.value)"
+                    onkeydown="if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); executeTranslation(this.value.trim()); }">${escapeHtml(transCurrentInput)}</textarea>
           <div class="trans-footer">
             <div style="font-size: 12px; color: var(--text-muted);" id="transCharCounter">
               ${transCurrentInput.length} belgi
@@ -1345,6 +1821,16 @@ function renderTranslatorView() {
           </div>
         </div>
       </div>
+
+      <!-- Oxirgi tarjimalar: bir bosishda qayta ishlatish -->
+      ${transHistory.length ? `
+        <div class="trans-history-bar">
+          <span class="trans-history-label">🕘 Oxirgi tarjimalar:</span>
+          ${transHistory.slice(0, 6).map(h => `
+            <button class="phrase-pill" onclick="pasteAndTranslate('${escapeQuotes(h.text)}')">${escapeHtml(h.text.slice(0, 28))}</button>
+          `).join('')}
+        </div>
+      ` : ''}
 
       <!-- Batafsil lug'at / transkripsiya / sinonimlar kartochkasi -->
       <div id="transDictDetails">
@@ -1466,13 +1952,23 @@ function swapTranslatorLanguages() {
   if (transCurrentInput.trim()) executeTranslation(transCurrentInput.trim());
 }
 
+function applyTranslationResult(result) {
+  transCurrentResult = result;
+  const out = document.getElementById("transOutput");
+  if (out) out.innerText = result.translated_text || "";
+  const dict = document.getElementById("transDictDetails");
+  if (dict) dict.innerHTML = renderDictDetails();
+}
+
 function handleLiveTranslation(val) {
   transCurrentInput = val;
   const counter = document.getElementById("transCharCounter");
   if (counter) counter.innerText = `${val.length} belgi`;
 
   if (transDebounceTimer) clearTimeout(transDebounceTimer);
-  if (!val.trim()) {
+  const clean = val.trim();
+  if (!clean) {
+    transRequestId++;
     transCurrentResult = null;
     const out = document.getElementById("transOutput");
     const dict = document.getElementById("transDictDetails");
@@ -1481,116 +1977,146 @@ function handleLiveTranslation(val) {
     return;
   }
 
-  transDebounceTimer = setTimeout(() => {
-    executeTranslation(val.trim());
-  }, 350);
+  // 1) Kesh yoki oflayn lug'at — darhol natija (tarmoq kutishsiz)
+  const instant = transOfflineLookup(clean, transSourceLang, transTargetLang)
+    || transCache.get(transCacheKey(clean, transSourceLang, transTargetLang));
+  if (instant && clean.length <= 40) {
+    rememberTranslation(clean, transSourceLang, transTargetLang, instant);
+    applyTranslationResult(instant);
+    return;
+  }
+
+  // 2) Tarmoq so'rovi qisqa kechikish bilan (yozishda har belgida so'rov yuborilmaydi)
+  transDebounceTimer = setTimeout(() => executeTranslation(clean), 180);
 }
 
-async function executeTranslation(text) {
+async function executeTranslation(text, skipInstant = false) {
   if (!text) return;
+  const requestId = ++transRequestId;
   transIsLoading = true;
   const loadInd = document.getElementById("transLoadingIndicator");
   if (loadInd) loadInd.style.display = "inline-block";
 
+  if (!skipInstant) {
+    const cached = transCache.get(transCacheKey(text, transSourceLang, transTargetLang));
+    if (cached) {
+      applyTranslationResult(cached);
+      transIsLoading = false;
+      if (loadInd) loadInd.style.display = "none";
+      return;
+    }
+  }
+
   const result = await fetchRealTranslation(text, transSourceLang, transTargetLang);
+  if (requestId !== transRequestId) return; // eski javob yangisini ustiga yozmasin
+
   transIsLoading = false;
   if (loadInd) loadInd.style.display = "none";
-
   if (result) {
-    transCurrentResult = result;
-    const out = document.getElementById("transOutput");
-    if (out) out.innerText = result.translated_text;
-    const dict = document.getElementById("transDictDetails");
-    if (dict) dict.innerHTML = renderDictDetails();
+    rememberTranslation(text, transSourceLang, transTargetLang, result);
+    applyTranslationResult(result);
   }
+}
+
+async function fetchWithTimeout(url, options = {}, ms = 1800) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const opts = { ...options };
+  if (controller) opts.signal = controller.signal;
+  const timer = controller ? setTimeout(() => controller.abort(), ms) : null;
+  try {
+    return await fetch(url, opts);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function parseGoogleTranslation(data, src, tgt) {
+  if (!data || !data[0]) return null;
+  let transText = "";
+  for (const item of data[0]) {
+    if (item && item[0]) transText += item[0];
+  }
+  if (!transText) return null;
+
+  const partsOfSpeech = [];
+  if (Array.isArray(data[1])) {
+    for (const posItem of data[1]) {
+      if (posItem && posItem.length >= 2) {
+        partsOfSpeech.push({
+          pos: posItem[0],
+          synonyms: Array.isArray(posItem[1]) ? posItem[1].slice(0, 8) : []
+        });
+      }
+    }
+  }
+  return {
+    success: true,
+    translated_text: transText,
+    source_lang: data[2] || (src === 'auto' ? 'en' : src),
+    target_lang: tgt,
+    parts_of_speech: partsOfSpeech
+  };
 }
 
 async function fetchRealTranslation(text, src = 'auto', tgt = 'uz') {
   if (!text || !text.trim()) return null;
   const clean = text.trim();
 
-  // 1. Agar backend server mavjud bo'lsa
+  // 1) Oflayn lug'at va kesh — eng tez yo'l
+  const offline = transOfflineLookup(clean, src, tgt);
+  if (offline) return offline;
+  const key = transCacheKey(clean, src, tgt);
+  const cached = transCache.get(key);
+  if (cached) return { ...cached, cached: true };
+
+  const googleUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${src}&tl=${tgt}&dt=t&dt=bd&q=${encodeURIComponent(clean)}`;
+  const myMemoryUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=${src === 'auto' ? 'en' : src}|${tgt}`;
+
+  const providers = [];
+
+  // 2) Backend mavjud bo'lsa, parallel ravishda ham so'raymiz (kim birinchi javob bersa — shuni olamiz)
   if (IS_API_ONLINE) {
-    try {
-      const res = await apiRequest('/translate', 'POST', { text: clean, source: src, target: tgt });
-      if (res && res.success && res.translated_text) {
-        return res;
-      }
-    } catch (e) {}
+    providers.push(
+      apiRequest('/translate', 'POST', { text: clean, source: src, target: tgt })
+        .then(res => (res && res.success && res.translated_text) ? res : null)
+        .catch(() => null)
+    );
   }
 
-  // 2. Google Translate bepul API (brauzerdan bevosita)
-  try {
-    const q = encodeURIComponent(clean);
-    const googleUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${src}&tl=${tgt}&dt=t&dt=bd&dt=rm&dt=at&q=${q}`;
-    const resp = await fetch(googleUrl, { method: "GET" });
-    if (resp.ok) {
-      const data = await resp.json();
-      let transText = "";
-      if (data && data[0]) {
-        for (const item of data[0]) {
-          if (item && item[0]) transText += item[0];
-        }
-      }
-      const detected = (data && data[2]) ? data[2] : (src === 'auto' ? 'en' : src);
-      const partsOfSpeech = [];
-      if (data && data[1] && Array.isArray(data[1])) {
-        for (const posItem of data[1]) {
-          if (posItem && posItem.length >= 2) {
-            partsOfSpeech.push({
-              pos: posItem[0],
-              synonyms: Array.isArray(posItem[1]) ? posItem[1].slice(0, 8) : []
-            });
-          }
-        }
-      }
+  providers.push(
+    (async () => {
+      const resp = await fetchWithTimeout(googleUrl, { method: "GET" }, 1600);
+      if (!resp.ok) return null;
+      return parseGoogleTranslation(await resp.json(), src, tgt);
+    })().catch(() => null)
+  );
 
-      if (transText) {
-        return {
-          success: true,
-          translated_text: transText,
-          source_lang: detected,
-          target_lang: tgt,
-          parts_of_speech: partsOfSpeech
-        };
-      }
-    }
-  } catch (e) {}
+  providers.push(
+    (async () => {
+      const resp = await fetchWithTimeout(myMemoryUrl, { method: "GET" }, 2200);
+      if (!resp.ok) return null;
+      const d = await resp.json();
+      const txt = d && d.responseData && d.responseData.translatedText;
+      if (!txt) return null;
+      return { success: true, translated_text: txt, source_lang: src, target_lang: tgt, parts_of_speech: [] };
+    })().catch(() => null)
+  );
 
-  // 3. MyMemory bepul API orqali zaxira
-  try {
-    const pair = `${src === 'auto' ? 'en' : src}|${tgt}`;
-    const myMemoryUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=${pair}`;
-    const resp2 = await fetch(myMemoryUrl);
-    if (resp2.ok) {
-      const d2 = await resp2.json();
-      const txt = d2?.responseData?.translatedText;
-      if (txt) {
-        return {
-          success: true,
-          translated_text: txt,
-          source_lang: src,
-          target_lang: tgt,
-          parts_of_speech: []
-        };
-      }
-    }
-  } catch (e) {}
-
-  // 4. Oflayn aqlli lug'at
-  const lowerWord = clean.toLowerCase();
-  if (EXTENSIVE_OFFLINE_DICT[lowerWord]) {
-    const item = EXTENSIVE_OFFLINE_DICT[lowerWord];
-    const trans = tgt === 'ru' && item.ru ? item.ru : (tgt === 'en' && item.en ? item.en : item.uz);
-    return {
-      success: true,
-      translated_text: trans,
-      source_lang: src === 'auto' ? 'en' : src,
-      target_lang: tgt,
-      ipa: item.ipa || "",
-      parts_of_speech: [{ pos: item.pos, synonyms: item.syn || [] }],
-      examples: item.ex || []
+  const result = await new Promise(resolve => {
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
     };
+    providers.forEach(p => p.then(value => { if (value) finish(value); }).catch(() => {}));
+    setTimeout(() => finish(null), 2400);
+  });
+
+  if (result && result.translated_text) {
+    transCache.set(key, result);
+    if (transCache.size > 300) transCache.delete(transCache.keys().next().value);
+    return result;
   }
 
   return {
@@ -1598,7 +2124,8 @@ async function fetchRealTranslation(text, src = 'auto', tgt = 'uz') {
     translated_text: `Tarjima: "${clean}" (${tgt.toUpperCase()})`,
     source_lang: src,
     target_lang: tgt,
-    parts_of_speech: []
+    parts_of_speech: [],
+    offline: true
   };
 }
 
@@ -1657,8 +2184,14 @@ function saveCurrentWordToFav() {
 let aiSettings = {
   provider: localStorage.getItem("lingova_ai_provider") || "cognitive", // 'cognitive' | 'gemini'
   geminiKey: localStorage.getItem("lingova_gemini_key") || "",
+  model: localStorage.getItem("lingova_gemini_model") || "gemini-3.5-flash-lite",
   isThinkingOpen: {}
 };
+
+const GEMINI_MODELS = [
+  { id: "gemini-3.5-flash-lite", label: "⚡ Gemini 3.5 Flash-Lite — tez va bepul (tavsiya)" },
+  { id: "gemini-2.5-flash", label: "🧠 Gemini 2.5 Flash — chuqurroq (ba'zi kalitlarda)" }
+];
 
 let aiChatHistory = [
   {
@@ -1669,8 +2202,25 @@ let aiChatHistory = [
   }
 ];
 
+function getPersonalAIPrompts() {
+  const focus = currentUser && currentUser.focus ? currentUser.focus : "speaking";
+  const level = currentUser && currentUser.level ? currentUser.level : "intermediate";
+  const lesson = activeLesson;
+  const prompts = {
+    speaking: ["Mening maqsadimga mos 5 ta hayotiy ibora tuzib ber", "Ravon gapirish uchun bugungi 3 daqiqalik mashq ber"],
+    grammar: ["Hozirgi grammatika qoidamni misollar bilan tushuntir", "Eng ko'p qiladigan 3 grammatika xatoligimni top"],
+    vocabulary: ["Mening sohamga oid 10 ta foydali so'z va misol ber", "Bu so'zlarni lug'at kartasiga o'xshash qilib tuz"],
+    exam: ["IELTS Writing Task 2 uchun tez strategiya ber", "Speaking Part 2 cue card uchun tayyor shablon ber"]
+  };
+  const list = (prompts[focus] || prompts.speaking).slice();
+  if (lesson && lesson.grammar) list.unshift(`"${lesson.grammar.title}" qoidasini sodda tushuntir`);
+  list.push(`${level} darajamga mos 1 ta qisqa dialog yozib ber`);
+  return list.slice(0, 3);
+}
+
 function renderAITutorView() {
-  const activeModelName = aiSettings.provider === 'gemini' && aiSettings.geminiKey ? "⚡ Google Gemini 1.5 Flash" : "🧠 Lingova Cognitive Brain";
+  const geminiActive = aiSettings.provider === 'gemini' && (aiSettings.geminiKey || (IS_API_ONLINE && window.LINGOVA_SERVER_GEMINI));
+  const activeModelName = geminiActive ? `⚡ ${aiSettings.model}` : "🧠 Lingova Cognitive Brain";
 
   appEl.innerHTML = `
     ${renderHeader('ai')}
@@ -1712,10 +2262,10 @@ function renderAITutorView() {
               ` : ''}
 
               <div class="ai-msg-bubble">
-                ${formatAIMessage(msg.text)}
+                ${msg.typing ? `<div class="ai-typing"><span></span><span></span><span></span> javob tayyorlanmoqda...</div>` : formatAIMessage(msg.text)}
               </div>
 
-              ${msg.sender === 'bot' ? `
+              ${msg.sender === 'bot' && !msg.typing ? `
                 <div class="ai-msg-actions">
                   <button class="ai-action-btn" onclick="speakText('${escapeQuotes(msg.text)}', 'uz-UZ')" title="Ovozli eshitish">
                     🔊 Tinglash
@@ -1730,6 +2280,13 @@ function renderAITutorView() {
               ` : ''}
             </div>
           </div>
+        `).join('')}
+      </div>
+
+      <!-- Shaxsiy darsga mos tezkor savollar -->
+      <div class="ai-quick-prompts ai-personal-row">
+        ${getPersonalAIPrompts().map(p => `
+          <button class="ai-prompt-btn ai-personal-prompt" onclick="sendQuickAIPrompt('${escapeQuotes(p)}')">✨ ${escapeHtml(p)}</button>
         `).join('')}
       </div>
 
@@ -1774,7 +2331,7 @@ function renderAITutorView() {
 
 function formatAIMessage(text) {
   if (!text) return "";
-  let clean = text
+  let clean = escapeHtml(text)
     .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
     .replace(/\*(.*?)\*/g, '<i>$1</i>')
     .replace(/`(.*?)`/g, '<code style="background: rgba(99,102,241,0.2); padding: 2px 6px; border-radius: 4px; font-family: monospace;">$1</code>')
@@ -1815,6 +2372,38 @@ function sendQuickAIPrompt(text) {
   }
 }
 
+function getGeminiHistory() {
+  return aiChatHistory
+    .filter(m => !m.typing && m.text)
+    .slice(-8)
+    .map(m => ({
+      role: m.sender === "user" ? "user" : "model",
+      parts: [{ text: String(m.text).replace(/<[^>]+>/g, "").slice(0, 1200) }]
+    }));
+}
+
+function getAISystemPrompt() {
+  const userContext = currentUser
+    ? `Foydalanuvchi darajasi: ${currentUser.level || "intermediate"}, maqsadi: ${currentUser.purpose || "abroad"}, e'tibor markazi: ${currentUser.focus || "speaking"}.`
+    : "";
+  const lessonContext = activeLesson && activeLesson.grammar
+    ? `Hozirgi darsi: ${activeLesson.title}. Grammatika mavzusi: ${activeLesson.grammar.title}.`
+    : "";
+  const caseContext = activeLesson
+    ? `Dars Harvard uslubidagi case tahliliga asoslangan: ${getLessonCase(activeLesson).title || activeLesson.title}.`
+    : "";
+
+  return `Sen Lingova Pro ta'lim platformasining aqlli, tez va pedagogik AI murabbiyisan. ${userContext} ${lessonContext} ${caseContext}
+Foydalanuvchining barcha savollariga (ingliz tili, rus tili, o'zbek tili, grammatika, gaplar tuzish, matematik va mantiqiy masalalar, IELTS/CEFR, ilm-fan) o'zbek tilida aniq, foydali va tushunarli qilib javob ber.
+Qoidalar:
+1. Avval to'g'ri javobni, keyin qisqa tushuntirish va bitta amaliy misol ber.
+2. Inglizcha iboralarni o'zbekcha tarjimasi bilan birga yoz.
+3. Formatlash uchun **qalin**, ro'yxatlar va kichik misollardan foydalan.
+4. Agar savol matematika bo'lsa, bosqichma-bosqich hisobla va yakuniy javobni ajratib ko'rsat.
+5. Darsga oid savolda Sokratik yondash: avval qisqa yo'naltiruvchi savol ber, so'ngra vaziyat → manfaatdorlar → qaror asosi tartibida tushuntir.
+6. Juda uzun javob yozma; o'rtacha 120-220 so'z yetarli.`;
+}
+
 async function handleAISubmit(e) {
   if (e && e.preventDefault) e.preventDefault();
   const inp = document.getElementById("aiInputField");
@@ -1825,68 +2414,102 @@ async function handleAISubmit(e) {
   inp.value = "";
   playSound('click');
 
+  const history = getGeminiHistory();
   aiChatHistory.push({ sender: "user", text: query });
+  const typingIndex = aiChatHistory.push({ sender: "bot", text: "", typing: true }) - 1;
   renderAITutorView();
 
   const submitBtn = document.getElementById("aiSubmitBtn");
   if (submitBtn) {
     submitBtn.disabled = true;
-    submitBtn.innerText = "Fikrlayapman... 🧠";
+    submitBtn.innerText = "Javob yozilmoqda... ⚡";
   }
 
-  // 1. Agar foydalanuvchi Gemini kalitini kiritgan bo'lsa
   let aiResponse = null;
-  if (aiSettings.provider === 'gemini' && aiSettings.geminiKey) {
-    aiResponse = await callGeminiAPI(query, aiSettings.geminiKey);
+  const useGemini = (aiSettings.provider === 'gemini') && (aiSettings.geminiKey || window.LINGOVA_SERVER_GEMINI);
+  if (useGemini) {
+    aiResponse = await callGeminiAPI(query, aiSettings.geminiKey, history);
   }
 
-  // 2. Agar Gemini bo'lmasa yoki xato bersa, Lingova Cognitive Engine ishlatiladi
-  if (!aiResponse) {
-    aiResponse = solveCognitiveAI(query);
-  }
+  // Gemini ishlamasa yoki kalit kiritilmagan bo'lsa — mahalliy Cognitive Engine ishlaydi
+  if (!aiResponse) aiResponse = solveCognitiveAI(query);
 
-  setTimeout(() => {
-    playSound('correct');
-    aiChatHistory.push({
-      sender: "bot",
-      text: aiResponse.text,
-      thinking: aiResponse.thinking,
-      model: aiResponse.model || "Lingova Cognitive Engine"
-    });
-    renderAITutorView();
-  }, 400);
+  aiChatHistory.splice(typingIndex, 1);
+  playSound('correct');
+  aiChatHistory.push({
+    sender: "bot",
+    text: aiResponse.text,
+    thinking: aiResponse.thinking,
+    model: aiResponse.model || "Lingova Cognitive Engine"
+  });
+  renderAITutorView();
 }
 
-// Haqiqiy Google Gemini 1.5/2.0 REST API integratsiyasi
-async function callGeminiAPI(prompt, apiKey) {
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-    const systemPrompt = "Sen Lingova Pro ta'lim platformasining eng aqlli, fikrlovchi va pedagogik AI murabbiyisan. Foydalanuvchining barcha savollariga (ingliz tili, rus tili, o'zbek tili, grammatika, oddiy va murakkab gaplar tuzish, matematika va misollarni qadamma-qadam yechish, IELTS/CEFR, ilm-fan) o'zbek tilida chuqur, chiroyli va tushunarli qilib javob ber. Formatlashda qalin harflar (**so'z**), ro'yxatlar va misollardan foydalan.";
-    const payload = {
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `${systemPrompt}\n\nFoydalanuvchi so'rovi: ${prompt}` }]
-        }
-      ]
-    };
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
+// Google Gemini REST API: server proksi yoki to'g'ridan-to'g'ri kalit bilan
+async function callGeminiAPI(prompt, apiKey, history = []) {
+  const systemPrompt = getAISystemPrompt();
+  const payload = {
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents: [
+      ...history,
+      { role: "user", parts: [{ text: prompt }] }
+    ],
+    generationConfig: { maxOutputTokens: 900 }
+  };
+
+  // 1) Backend proksisi afzal: kalit serverda bo'lsa ham ishlaydi
+  if (IS_API_ONLINE) {
+    try {
+      const res = await apiRequest('/ai/chat', 'POST', {
+        prompt,
+        history,
+        api_key: apiKey || "",
+        model: aiSettings.model
+      });
+      if (res && res.success && res.response) {
+        return {
+          text: res.response,
+          thinking: res.thinking || "Gemini orqali kontekst va grammatika tahlil qilindi.",
+          model: res.model || aiSettings.model
+        };
+      }
+    } catch (e) {}
+  }
+
+  // 2) Brauzerdan to'g'ridan-to'g'ri (faqat foydalanuvchi o'z kalitini kiritgan bo'lsa)
+  if (!apiKey || apiKey.length < 15) return null;
+
+  const models = [aiSettings.model, "gemini-3.5-flash-lite"].filter((m, i, arr) => arr.indexOf(m) === i);
+  for (const model of models) {
+    try {
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 12000) : null;
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
+        },
+        body: JSON.stringify(payload),
+        ...(controller ? { signal: controller.signal } : {})
+      });
+      if (timer) clearTimeout(timer);
+      if (!res.ok) continue;
       const data = await res.json();
-      const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const answer = data && data.candidates && data.candidates[0]
+        && data.candidates[0].content && data.candidates[0].content.parts
+        && data.candidates[0].content.parts[0]
+        ? data.candidates[0].content.parts[0].text
+        : null;
       if (answer) {
         return {
           text: answer,
-          thinking: "Google Gemini 1.5 Flash neyron modeli orqali to'liq fikrlandi va chuqur tahlil qilindi.",
-          model: "Google Gemini 1.5 Flash"
+          thinking: `${model} orqali savol konteksti, grammatika va misollar tahlil qilindi.`,
+          model: `Google ${model}`
         };
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
   return null;
 }
 
@@ -2130,42 +2753,54 @@ function openAISettingsModal() {
 
   container.innerHTML = `
     <div class="modal-overlay" onclick="closeAISettingsModal(event)">
-      <div class="modal-card animate-fade" onclick="event.stopPropagation()">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div class="modal-card ai-settings-card animate-fade" onclick="event.stopPropagation()">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="font-size: 18px; font-weight: 800;">⚙️ AI Murabbiy Sozlamalari</h2>
           <button class="trans-swap-btn" style="width: 28px; height: 28px;" onclick="closeAISettingsModal()">✕</button>
         </div>
 
-        <p style="font-size: 13.5px; color: var(--text-secondary); margin-bottom: 16px;">
-          AI dvigatelini tanlang. Lingova o'rnatilgan Cognitive Brain orqali barcha savollarga, matematikaga va gaplar tuzishga bepul javob beradi. Agar xohlasangiz, Google Gemini API kalitini ham ulab qo'yishingiz mumkin.
+        <div class="ai-settings-status">
+          <span class="ai-status-dot"></span>
+          ${window.LINGOVA_SERVER_GEMINI ? 'Server kaliti ulangan — kalit kiritish shart emas' : (aiSettings.geminiKey ? 'Shu brauzerda saqlangan kalit ishlatiladi' : 'Mahalliy Cognitive Brain faol')}
+        </div>
+
+        <p style="font-size: 13.5px; color: var(--text-secondary); margin: 12px 0 16px;">
+          Lingova o'rnatgan Cognitive Brain bepul ishlaydi. Agar o'zingizning bepul Gemini API kalitingizni ulasangiz, AI yanada keng va chuqur javob beradi. Kalit faqat shu brauzerda saqlanadi yoki serverdagi <code>GEMINI_API_KEY</code> orqali ishlatiladi.
         </p>
 
         <div style="margin-bottom: 16px;">
           <label style="font-size: 13px; font-weight: 700; display: block; margin-bottom: 8px;">Asosiy AI Dvigateli:</label>
           <div style="display: flex; gap: 10px;">
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; flex: 1; padding: 10px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);">
+            <label class="ai-provider-option">
               <input type="radio" name="aiProviderChoice" value="cognitive" ${aiSettings.provider === 'cognitive' ? 'checked' : ''} onchange="updateProviderChoice(this.value)">
-              <span>🧠 Lingova Cognitive Brain (Bepul & Avtomatik)</span>
+              <span>🧠 Cognitive Brain <small>Bepul, tarmoqsiz</small></span>
             </label>
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; flex: 1; padding: 10px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);">
+            <label class="ai-provider-option">
               <input type="radio" name="aiProviderChoice" value="gemini" ${aiSettings.provider === 'gemini' ? 'checked' : ''} onchange="updateProviderChoice(this.value)">
-              <span>⚡ Google Gemini (API Kalit bilan)</span>
+              <span>⚡ Google Gemini <small>Shaxsiy kalit bilan</small></span>
             </label>
           </div>
         </div>
 
         <div style="margin-bottom: 18px;" id="geminiKeyGroup">
-          <label style="font-size: 13px; font-weight: 700; display: block; margin-bottom: 6px;">
-            Google Gemini API Kaliti (Ixtiyoriy):
-          </label>
-          <input type="password" id="geminiApiKeyInput" class="ai-input-field" style="width: 100%; margin-bottom: 8px;"
-                 placeholder="AIzaSy..." value="${escapeHtml(aiSettings.geminiKey)}">
-          <div style="font-size: 12px; color: var(--text-muted);">
-            Google AI Studio-dan 100% bepul olish: 
-            <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: var(--primary); text-decoration: underline;">
-              aistudio.google.com/app/apikey ↗
-            </a>
+          <label style="font-size: 13px; font-weight: 700; display: block; margin-bottom: 6px;">Gemini modeli:</label>
+          <select id="geminiModelSelect" class="trans-lang-select" style="width: 100%; margin-bottom: 12px;">
+            ${GEMINI_MODELS.map(m => `<option value="${m.id}" ${aiSettings.model === m.id ? 'selected' : ''}>${escapeHtml(m.label)}</option>`).join('')}
+          </select>
+
+          <label style="font-size: 13px; font-weight: 700; display: block; margin-bottom: 6px;">Google Gemini API Kaliti:</label>
+          <div class="ai-key-row">
+            <input type="password" id="geminiApiKeyInput" class="ai-input-field"
+                   placeholder="AIzaSy..." value="${escapeHtml(aiSettings.geminiKey)}">
+            <button class="btn btn-secondary btn-sm" onclick="toggleGeminiKeyVisibility()">👁️</button>
           </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap;">
+            <div style="font-size: 12px; color: var(--text-muted);">
+              Bepul kalit: <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: var(--primary); text-decoration: underline;">AI Studio ↗</a>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="testGeminiConnection()">🔌 Kalitni sinash</button>
+          </div>
+          <div id="geminiTestResult" class="ai-test-result"></div>
         </div>
 
         <div style="display: flex; justify-content: flex-end; gap: 10px;">
@@ -2179,19 +2814,68 @@ function openAISettingsModal() {
 
 function updateProviderChoice(val) {
   aiSettings.provider = val;
+  const group = document.getElementById("geminiKeyGroup");
+  if (group) group.style.opacity = val === 'gemini' ? '1' : '0.55';
 }
 
-function closeAISettingsModal() {
+function toggleGeminiKeyVisibility() {
+  const input = document.getElementById("geminiApiKeyInput");
+  if (!input) return;
+  input.type = input.type === "password" ? "text" : "password";
+}
+
+async function testGeminiConnection() {
+  const box = document.getElementById("geminiTestResult");
+  const keyInput = document.getElementById("geminiApiKeyInput");
+  const modelSelect = document.getElementById("geminiModelSelect");
+  if (!box) return;
+  const key = keyInput ? keyInput.value.trim() : aiSettings.geminiKey;
+  const model = modelSelect ? modelSelect.value : aiSettings.model;
+  box.className = "ai-test-result testing";
+  box.textContent = "⏳ Gemini bilan bog'lanish tekshirilmoqda...";
+
+  let ok = false;
+  if (IS_API_ONLINE) {
+    const res = await apiRequest('/ai/chat', 'POST', { prompt: "Salom! Bir so'z bilan javob ber.", api_key: key, model });
+    ok = !!(res && res.success && res.response);
+  }
+  if (!ok && key.length >= 15) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Salom! Bir so'z bilan javob ber." }] }] })
+      });
+      ok = res.ok;
+    } catch (e) {}
+  }
+
+  box.className = `ai-test-result ${ok ? 'ok' : 'fail'}`;
+  box.textContent = ok
+    ? `✅ Ulandi! ${model} ishlamoqda.`
+    : "❌ Ulanmadi. Kalitni yoki modelni tekshiring (yoki serverning GEMINI_API_KEY o'zgaruvchisini qo'ying).";
+  playSound(ok ? 'correct' : 'wrong');
+}
+
+function closeAISettingsModal(event) {
+  if (event && event.target && !event.target.classList.contains("modal-overlay")) return;
   const container = document.getElementById("aiSettingsModalContainer");
   if (container) container.innerHTML = "";
 }
 
 function saveAISettings() {
   const keyInput = document.getElementById("geminiApiKeyInput");
+  const modelSelect = document.getElementById("geminiModelSelect");
   if (keyInput) {
     aiSettings.geminiKey = keyInput.value.trim();
     localStorage.setItem("lingova_gemini_key", aiSettings.geminiKey);
   }
+  if (modelSelect) {
+    aiSettings.model = modelSelect.value;
+    localStorage.setItem("lingova_gemini_model", aiSettings.model);
+  }
+  // Kalit kiritilgan bo'lsa, Gemini avtomatik asosiy dvigatelga aylanadi
+  if (aiSettings.geminiKey && aiSettings.provider === 'cognitive') aiSettings.provider = 'gemini';
   localStorage.setItem("lingova_ai_provider", aiSettings.provider);
   playSound('diamond');
   closeAISettingsModal();

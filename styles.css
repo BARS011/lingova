@@ -1647,17 +1647,23 @@ body::before {
 /* Modallar */
 .modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(6px);
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   z-index: 10000;
   display: grid;
   place-items: center;
   padding: 20px;
   animation: fadeIn 0.2s ease;
+}
+
+.modal-overlay > * {
+  max-height: min(90vh, 820px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-card {
@@ -1822,20 +1828,7 @@ body::before {
   font-size: 16px;
 }
 
-/* ================= Modal ================= */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  z-index: 999;
-  animation: fadeIn 0.2s ease;
-}
-
+/* ================= Modal ichidagi kontent ================= */
 .modal-content {
   background: var(--bg-card);
   border: 1.5px solid var(--border);
@@ -1995,4 +1988,952 @@ body::before {
   font-size: 14.5px;
   font-weight: 800;
   color: var(--text-primary);
+}
+
+/* ==========================================================================
+   YANGI AVTORLIK XUSUSIYATLARI: tayyor variantlar, tezkor tarjimon, AI
+   ========================================================================== */
+
+@keyframes lingovaShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes lingovaFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes lingovaDot {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.75); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* Karta ustidagi nozik nur chiziqi — har bir kartaga alohida ko'rinish beradi */
+.card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 18%;
+  right: 18%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.65), transparent);
+  pointer-events: none;
+}
+
+/* Hero banner ichidagi nuqtali tuzilma */
+.hero-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.16) 1px, transparent 1px);
+  background-size: 18px 18px;
+  mask-image: linear-gradient(135deg, rgba(0, 0, 0, 0.65), transparent 70%);
+  -webkit-mask-image: linear-gradient(135deg, rgba(0, 0, 0, 0.65), transparent 70%);
+  pointer-events: none;
+}
+
+.hero-banner > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ----- 4 bosqichli onboarding ----- */
+.onboarding-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.onboarding-wrap::before {
+  content: "";
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  top: -150px;
+  left: -90px;
+  background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.onboarding-wrap > * {
+  position: relative;
+  z-index: 1;
+}
+
+.onboarding-topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+
+.onboarding-topline span:first-child {
+  color: #818cf8;
+}
+
+.step-caption {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin: -14px 0 18px;
+}
+
+.focus-choices .choice-card:nth-child(2) .choice-icon,
+.variant-chip:nth-child(3) {
+  color: #a5b4fc;
+}
+
+.onboarding-minutes-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  margin-bottom: 14px;
+}
+
+.onboarding-minutes-row .trans-lang-select {
+  min-width: 170px;
+}
+
+.onboarding-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  background: linear-gradient(120deg, var(--emerald-subtle), var(--primary-subtle));
+  animation: lingovaFloat 4s ease-in-out infinite;
+}
+
+.preview-icon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--bg-surface);
+  font-size: 21px;
+  box-shadow: var(--shadow-sm);
+}
+
+.preview-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.preview-meta span::before {
+  content: "✓ ";
+  color: var(--emerald);
+}
+
+/* ----- Tayyor variant belgilari ----- */
+.variant-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 18px;
+}
+
+.variant-chip {
+  font-size: 12px;
+  font-weight: 800;
+  color: #c7d2fe;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: var(--primary-subtle);
+}
+
+.variant-chip:last-child {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.25), rgba(99, 102, 241, 0.25));
+  background-size: 200% 100%;
+  animation: lingovaShimmer 5s linear infinite;
+  color: var(--text-primary);
+}
+
+/* ----- Dars ichidagi yangi tafsilotlar ----- */
+.lesson-grammar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lesson-focus-chip {
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: var(--primary-subtle);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+}
+
+.grammar-pron-row,
+.bubble-pron {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #38bdf8;
+  margin-bottom: 14px;
+}
+
+.bubble-pron {
+  margin: 3px 0 4px;
+  opacity: 0.9;
+}
+
+.vocab-tip {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 8px;
+  font-style: italic;
+}
+
+.quiz-why {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border-left: 2px solid var(--cyan);
+}
+
+/* ----- Tezkor tarjimon ----- */
+.trans-speed-badge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  color: var(--emerald);
+  background: var(--emerald-subtle);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.trans-speed-badge::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: var(--emerald);
+  box-shadow: 0 0 8px var(--emerald);
+}
+
+.trans-history-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  margin-top: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.trans-history-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+/* ----- AI murabbiy ----- */
+.ai-personal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ai-personal-prompt {
+  border-color: rgba(168, 85, 247, 0.45);
+  background: linear-gradient(120deg, rgba(168, 85, 247, 0.12), var(--primary-subtle));
+  color: #ddd6fe;
+}
+
+.ai-personal-prompt:hover {
+  border-color: var(--pro-color);
+  color: #f5f3ff;
+}
+
+.ai-typing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.ai-typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: lingovaDot 1.2s infinite ease-in-out;
+}
+
+.ai-typing span:nth-child(2) { animation-delay: 0.15s; }
+.ai-typing span:nth-child(3) { animation-delay: 0.3s; margin-right: 4px; }
+
+.ai-settings-card {
+  max-width: 620px;
+}
+
+.ai-settings-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.ai-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--emerald);
+  box-shadow: 0 0 0 4px var(--emerald-subtle);
+  flex-shrink: 0;
+}
+
+.ai-provider-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: var(--transition);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ai-provider-option:hover {
+  border-color: var(--border-focus);
+}
+
+.ai-provider-option:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-subtle);
+}
+
+.ai-provider-option small {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ai-key-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ai-key-row .ai-input-field {
+  min-width: 0;
+}
+
+.ai-test-result {
+  min-height: 18px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.ai-test-result.ok { color: var(--emerald); }
+.ai-test-result.fail { color: var(--red); }
+.ai-test-result.testing { color: var(--primary); }
+
+/* Kichik ekranlarda moslashish */
+@media (max-width: 640px) {
+  .onboarding-topline {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .onboarding-minutes-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .onboarding-minutes-row .trans-lang-select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .onboarding-preview {
+    animation: none;
+  }
+
+  .ai-provider-option {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-preview,
+  .variant-chip:last-child,
+  .ai-typing span {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   AKADEMIK QATLAM: Harvard uslubidagi case-method dars tajribasi
+   Mustaqil o'quv dizayni — rasmiy Harvard materiallari emas.
+   ========================================================================== */
+:root {
+  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
+  --academic: #d97706;
+  --academic-deep: #b45309;
+  --academic-soft: rgba(245, 158, 11, 0.11);
+  --academic-border: rgba(245, 158, 11, 0.32);
+  --paper-line: rgba(148, 163, 184, 0.12);
+}
+
+[data-theme="light"] {
+  --academic: #b45309;
+  --academic-deep: #92400e;
+  --academic-soft: rgba(254, 243, 199, 0.55);
+  --academic-border: rgba(180, 83, 9, 0.22);
+  --paper-line: rgba(120, 53, 15, 0.08);
+}
+
+/* Akademik hero — jurnal muqovasi taassuroti */
+.hero-banner {
+  border-color: var(--academic-border);
+  background:
+    linear-gradient(135deg, rgba(180, 83, 9, 0.18) 0%, rgba(19, 28, 49, 0.97) 46%, rgba(15, 23, 42, 0.95) 100%);
+}
+
+[data-theme="light"] .hero-banner {
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.92) 0%, rgba(255, 255, 255, 0.98) 58%, rgba(248, 250, 252, 1) 100%);
+}
+
+.hero-title {
+  font-family: var(--font-serif);
+  letter-spacing: -0.02em;
+}
+
+.variant-chip:nth-child(4) {
+  border-color: var(--academic-border);
+  background: var(--academic-soft);
+  color: var(--academic);
+}
+
+/* ----- Case oynasi ----- */
+.case-shell {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.case-brief {
+  position: relative;
+  overflow: hidden;
+  padding: 32px 34px;
+  margin-bottom: 16px;
+  border: 1px solid var(--academic-border);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(245, 158, 11, 0.055), transparent 150px),
+    var(--bg-card);
+  box-shadow: var(--shadow-lg);
+}
+
+.case-brief::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(var(--paper-line) 1px, transparent 1px);
+  background-size: 100% 30px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.case-brief > * {
+  position: relative;
+  z-index: 1;
+}
+
+.case-eyebrow {
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--academic);
+}
+
+.case-title {
+  font-family: var(--font-serif);
+  font-size: 30px;
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  margin: 9px 0 14px;
+}
+
+.method-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--academic-soft);
+  border: 1px solid var(--academic-border);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.method-ribbon span:first-child {
+  color: var(--academic);
+}
+
+.case-topic-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.case-topic-line b {
+  color: var(--text-primary);
+  font-weight: 800;
+}
+
+.academic-divider {
+  height: 1px;
+  margin: 22px 0;
+  background: linear-gradient(90deg, var(--academic-border), transparent);
+}
+
+.case-block {
+  margin-bottom: 20px;
+}
+
+.case-label {
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--academic);
+  margin-bottom: 9px;
+}
+
+.objectives-list {
+  display: grid;
+  gap: 6px;
+  margin-left: 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.objectives-list li::marker {
+  color: var(--academic);
+}
+
+.case-context {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--text-primary);
+}
+
+.stakeholder-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.stakeholder-label {
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 1.1px;
+  color: var(--text-muted);
+}
+
+.stakeholder-chip {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.case-dilemma {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--premium-color);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: rgba(245, 158, 11, 0.08);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.case-dilemma span {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--font-main);
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 1.4px;
+  color: var(--premium-color);
+}
+
+.case-framework {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.framework-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.framework-num {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--academic-border);
+  background: var(--academic-soft);
+  color: var(--academic);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.socratic-list {
+  display: grid;
+  gap: 10px;
+}
+
+.socratic-item {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.socratic-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.socratic-q {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.socratic-hint {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--cyan);
+  border-radius: 0 8px 8px 0;
+  background: var(--cyan-subtle);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.case-decision {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--border);
+}
+
+.case-textarea {
+  width: 100%;
+  min-height: 76px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  outline: none;
+  resize: vertical;
+  transition: var(--transition);
+}
+
+.case-textarea:focus {
+  border-color: var(--academic);
+  box-shadow: 0 0 0 3px var(--academic-soft);
+}
+
+.case-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.case-model {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  border-radius: var(--radius-sm);
+  background: var(--emerald-subtle);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.case-prep {
+  display: grid;
+  gap: 7px;
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px dashed var(--academic-border);
+  border-radius: var(--radius-sm);
+  background: var(--academic-soft);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ----- Refleksiya va rubrika ----- */
+.reflection-shell {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.reflection-hero {
+  padding: 28px 30px;
+  margin-bottom: 16px;
+}
+
+.reflection-hero .case-title {
+  font-size: 28px;
+}
+
+.reflection-takeaway {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--academic);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--academic-soft);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.reflection-takeaway span {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  color: var(--academic);
+}
+
+.reflection-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.reflection-card,
+.rubric-card {
+  padding: 24px;
+}
+
+.reflection-list {
+  display: grid;
+  gap: 18px;
+}
+
+.reflection-q {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.reflection-count {
+  margin-top: 5px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rubric-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.rubric-score {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.rubric-list {
+  display: grid;
+  gap: 10px;
+}
+
+.rubric-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  font-size: 13.5px;
+  line-height: 1.45;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.rubric-item:hover {
+  border-color: var(--academic-border);
+}
+
+.rubric-item:has(input:checked) {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: var(--emerald-subtle);
+}
+
+.rubric-item input {
+  margin-top: 3px;
+  accent-color: var(--emerald);
+}
+
+.rubric-note {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.lesson-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.lesson-actions .btn-full {
+  flex: 1;
+}
+
+/* Birinchi va oxirgi bosqichlar akademik rang bilan ajralib turadi */
+.lesson-tabs-bar .lesson-tab-btn:first-child.active {
+  border-color: var(--academic);
+  background: linear-gradient(135deg, var(--academic-deep), var(--academic));
+  color: #fff;
+}
+
+.lesson-tabs-bar .lesson-tab-btn:last-child.active {
+  border-color: rgba(16, 185, 129, 0.7);
+  background: linear-gradient(135deg, #047857, var(--emerald));
+  color: #fff;
+}
+
+@media (min-width: 820px) {
+  .reflection-grid {
+    grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .case-brief {
+    padding: 22px 20px;
+  }
+
+  .case-title,
+  .reflection-hero .case-title {
+    font-size: 24px;
+  }
+
+  .case-framework {
+    grid-template-columns: 1fr;
+  }
+
+  .socratic-top {
+    flex-direction: column;
+  }
+
+  .reflection-hero,
+  .reflection-card,
+  .rubric-card {
+    padding: 20px;
+  }
+
+  .rubric-head {
+    flex-direction: column;
+  }
+
+  .lesson-actions {
+    flex-direction: column;
+  }
 }

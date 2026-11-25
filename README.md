@@ -64,14 +64,54 @@ To'plangan olmoslar evaziga IELTS va CEFR kurslarini sotib olish:
 - ✍️ **Writing Examiner**: 4 ta rasmiy mezon (Task Response, Coherence, Lexical, Grammar) bo'yicha Band Score (1.0 - 9.0) va batafsil xatolar tahlili.
 - 🎤 **Speaking Examiner**: Examiner savollarini tabiiy inglizcha ovozda o'qiydi, foydalanuvchi mikrofon orqali gapiradi va nutq tezligi (WPM), ravonlik hamda talaffuz bo'yicha baholanadi.
 
+### 9. 🧠 Oldindan Tayyorlangan 48 Ta Shaxsiy Variant
+Kirishda 4 savol soraladi: **maqsad** (Sayohat / Karyera / IT / IELTS), **daraja** (A1–A2 / B1–B2 / C1), **muddat** va **e'tibor markazi** (Ravon muloqot / Grammatika / Lug'at / Imtihon).
+- `4 maqsad × 3 daraja × 4 uslub = 48` tayyor reja dastur yuklanayotganda shakllantiriladi.
+- Tanlagan variant darhol materiallashtiriladi — tarmoq so'rovi va kutish yo'q.
+- Har bir dars **Harvard uslubidagi case-method** asosida qurilgan: vaziyat → manfaatdorlar → dilemma → Sokratik savollar → qaror asosi → refleksiya va o'zbaholash rubrikasi. Bu mustaqil pedagogik material bo'lib, rasmiy Harvard darslari emas.
+- Grammatika qoidasi + formula + tushuntirish + misol + xato tahlili, lug'at (IPA va o'qilishi), jonli dialog va 4 ta mashq (jumladan case testi) mavjud.
+- Noto'g'ri javob darsni yopmaydi: sabab tushuntiriladi va qayta urinish mumkin.
+
+### 10. ⚡ Tezkor Smart Tarjimon
+- Oflayn lug'at va xotira keshi orqali **darhol** natija.
+- Google, MyMemory va backend provayderlari **parallel** so'raladi; birinchi javob olinsa, qolganlari kutmaydi.
+- Eski so'rovlar yangi natijani ustiga yozmaydi (race guard).
+- oxirgi tarjimalar paneli, `Ctrl/Cmd + Enter` bilan tez tarjima, sinonim va misollar saqlanadi.
+
+### 11. 🤖 Gemini AI Murabbiy (O'zingizning Kalitingiz Bilan)
+- Sozlamalarda o'z bepul `Gemini API` kalitingizni kiritishingiz yoki serverda `GEMINI_API_KEY` o'zgaruvchisini qo'yishingiz mumkin. **Kodda hech qanday maxfiy kalit yo'q.**
+- Suhbat tarixi, foydalanuvchi darajasi/maqsadi, ochiq darsning grammatika mavzusi va case sarlavhasi Gemini'ga kontekst sifatida yuboriladi; AI Sokratik uslubda yo'naltiradi.
+- Kalit yo'q yoki xato bo'lsa, ilova avtomatik ravishda o'rnatilgan **Lingova Cognitive Brain** ga qaytadi.
+- "🔌 Kalitni sinash" tugmasi ulanishni darhol tekshiradi.
+
 ---
 
 ## 🚀 Ishga Tushirish
 
-1. **Bir bosishda**: [run_app.bat](file:///c:/Users/pozil/OneDrive/Desktop/project/run_app.bat) faylini ikki marta bosing.
+1. **Bir bosishda**: `run_app.bat` faylini ikki marta bosing.
 2. **Python orqali**:
    ```bash
    python server.py
    ```
    So'ng brauzerda: `http://localhost:8000`
-3. **To'g'ridan-to'g'ri brauzerda**: [index.html](file:///c:/Users/pozil/OneDrive/Desktop/project/index.html) yoki [tilla-learning.html](file:///c:/Users/pozil/OneDrive/Desktop/project/tilla-learning.html) faylini oching.
+3. **To'g'ridan-to'g'ri brauzerda**: `index.html` yoki `tilla-learning.html` faylini oching. Barcha shaxsiy darslar, tarjimon va Cognitive Brain tarmoqsiz ishlaydi; `curriculum.js` fayli `app.js` dan keyin yuklanishi shart.
+
+### Gemini kalitini ulash (ixtiyoriy)
+
+**Usul 1 — ilova ichida (eng oson):** AI Murabbiy → ⚙️ AI Sozlamalari → kalitni kiriting → `Saqlash`. Kalit faqat shu brauzerning `localStorage`ida saqlanadi.
+
+**Usul 2 — server orqali (barcha brauzerlar uchun):**
+```bash
+# Windows (CMD)
+set GEMINI_API_KEY=AIza...
+python server.py
+
+# Windows (PowerShell)
+$env:GEMINI_API_KEY="AIza..."
+python server.py
+
+# macOS / Linux
+export GEMINI_API_KEY=AIza...
+python server.py
+```
+Bepul kalitni [Google AI Studio](https://aistudio.google.com/app/apikey) dan olishingiz mumkin. Tavsiya etilgan model: `gemini-3.5-flash-lite` (tez va bepul). Server ishlab turganida `/api/ai/status` Kalit ulanganligini ko'rsatadi.

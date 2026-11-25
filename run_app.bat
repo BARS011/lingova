@@ -5,6 +5,12 @@ echo          LINGOVA - ZAMONAVIY TIL O'RGANISH PLATFORMASI
 echo =======================================================
 echo.
 
+if not "%GEMINI_API_KEY%"=="" (
+    echo [OK] GEMINI_API_KEY topildi. Gemini AI server orqali ulanadi.
+) else (
+    echo [INFO] GEMINI_API_KEY qo'yilmadi. AI sozlamalaridan o'z kalitingizni kiritishingiz yoki keyinroq env o'zgaruvchisini qo'yishingiz mumkin.
+)
+
 where python >nul 2>nul
 if %ERRORLEVEL% equ 0 (
     echo [OK] Python topildi. Backend server ishga tushirilmoqda...

@@ -25,15 +25,27 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ACTIVE_SESSIONS = {}
 
+# Gemini kaliti server tarafdan ham ishlatilishi mumkin:
+#   Windows:  set GEMINI_API_KEY=AIza...
+#   macOS/Linux: export GEMINI_API_KEY=AIza...
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = "gemini-3.5-flash-lite"
+TRANSLATE_CACHE = {}
+TRANSLATE_CACHE_LIMIT = 500
+
 def backend_translate(text, source='auto', target='uz'):
     if not text or not text.strip():
         return {'success': True, 'translated_text': '', 'source_lang': source, 'target_lang': target, 'parts_of_speech': []}
     text = text.strip()
+    cache_key = (source, target, text.lower())
+    cached = TRANSLATE_CACHE.get(cache_key)
+    if cached:
+        return {**cached, 'cached': True}
     try:
         encoded_q = urllib.parse.quote(text)
         url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={source}&tl={target}&dt=t&dt=bd&dt=rm&dt=at&q={encoded_q}"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-        with urllib.request.urlopen(req, timeout=6) as response:
+        with urllib.request.urlopen(req, timeout=4) as response:
             raw = response.read().decode('utf-8')
             data = json.loads(raw)
             translated_chunks = []
@@ -55,29 +67,35 @@ def backend_translate(text, source='auto', target='uz'):
                             "synonyms": synonyms[:8]
                         })
 
-            return {
+            result = {
                 'success': True,
                 'translated_text': translated_text,
                 'source_lang': detected_lang,
                 'target_lang': target,
                 'parts_of_speech': parts_of_speech
             }
+            if len(TRANSLATE_CACHE) >= TRANSLATE_CACHE_LIMIT:
+                TRANSLATE_CACHE.pop(next(iter(TRANSLATE_CACHE)), None)
+            TRANSLATE_CACHE[cache_key] = result
+            return result
     except Exception as e:
         try:
             pair = f"{'en' if source=='auto' else source}|{target}"
             url2 = f"https://api.mymemory.translated.net/get?q={urllib.parse.quote(text)}&langpair={pair}"
             req2 = urllib.request.Request(url2, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req2, timeout=6) as resp2:
+            with urllib.request.urlopen(req2, timeout=4) as resp2:
                 d2 = json.loads(resp2.read().decode('utf-8'))
                 trans = d2.get('responseData', {}).get('translatedText', '')
                 if trans:
-                    return {
+                    result = {
                         'success': True,
                         'translated_text': trans,
                         'source_lang': source,
                         'target_lang': target,
                         'parts_of_speech': []
                     }
+                    TRANSLATE_CACHE[cache_key] = result
+                    return result
         except Exception:
             pass
         return {
@@ -85,36 +103,57 @@ def backend_translate(text, source='auto', target='uz'):
             'error': str(e)
         }
 
-def backend_ai_chat(prompt, history=None, api_key=None):
+def backend_ai_chat(prompt, history=None, api_key=None, model=None):
     if not prompt or not prompt.strip():
         return {'success': False, 'error': 'Savol kiritilmadi'}
     prompt = prompt.strip()
 
-    if api_key and len(api_key) > 15:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-            payload = {
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [
-                            {"text": f"Sen Lingova Pro ta'lim platformasining eng aqlli, fikrlovchi va professional AI murabbiyisan. Foydalanuvchiga har qanday mavzuda (ingliz tili, rus tili, grammatika, gaplar tuzish (oddiy, bog'langan, murakkab, shart ergash), matematika va hisob-kitoblar, misollarni bosqichma-bosqich ishlash, IELTS/CEFR) o'zbek tilida chuqur, chiroyli va tushunarli qilib javob ber.\n\nFoydalanuvchi savoli: {prompt}"}
-                        ]
-                    }
-                ]
-            }
-            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                result = json.loads(resp.read().decode('utf-8'))
-                text = result['candidates'][0]['content']['parts'][0]['text']
-                return {
-                    'success': True,
-                    'thinking': "Google Gemini 1.5 Flash neyron modeli orqali chuqur tahlil qilindi.",
-                    'response': text,
-                    'model': 'gemini-1.5-flash'
+    key = (api_key or GEMINI_API_KEY or "").strip()
+    model_name = (model or GEMINI_MODEL).strip()
+    if model_name not in (GEMINI_MODEL, "gemini-2.5-flash"):
+        model_name = GEMINI_MODEL
+
+    if len(key) > 15:
+        models_to_try = [model_name] if model_name == GEMINI_MODEL else [model_name, GEMINI_MODEL]
+        for current_model in models_to_try:
+            try:
+                contents = []
+                for item in (history or [])[-8:]:
+                    role = "model" if item.get("role") in ("model", "assistant", "bot") else "user"
+                    text = str(item.get("text") or item.get("parts", [{}])[0].get("text", ""))
+                    if text.strip():
+                        contents.append({"role": role, "parts": [{"text": text[:1200]}]})
+                contents.append({"role": "user", "parts": [{"text": prompt}]})
+
+                payload = {
+                    "system_instruction": {
+                        "parts": [{
+                            "text": "Sen Lingova Pro ta'lim platformasining aqlli va pedagogik AI murabbiyisan. "
+                                    "Foydalanuvchining barcha savollariga o'zbek tilida aniq, foydali va tushunarli qilib javob ber. "
+                                    "Avval to'g'ri javobni, keyin qisqa tushuntirish va bitta amaliy misol ber. "
+                                    "Inglizcha iboralarni o'zbekcha tarjimasi bilan birga yoz. Juda uzun yozma."
+                        }]
+                    },
+                    "contents": contents,
+                    "generationConfig": {"maxOutputTokens": 900}
                 }
-        except Exception:
-            pass
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent"
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode('utf-8'),
+                    headers={'Content-Type': 'application/json', 'x-goog-api-key': key}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                    text = result['candidates'][0]['content']['parts'][0]['text']
+                    return {
+                        'success': True,
+                        'thinking': f"{current_model} orqali kontekst, grammatika va misollar tahlil qilindi.",
+                        'response': text,
+                        'model': current_model
+                    }
+            except Exception:
+                continue
 
     thinking_steps = []
     lower = prompt.lower()
@@ -214,7 +253,7 @@ class LingovaRequestHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-goog-api-key')
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -363,8 +402,9 @@ class LingovaRequestHandler(http.server.SimpleHTTPRequestHandler):
             purpose = data.get('purpose', 'abroad')
             duration = data.get('duration', '1_month')
             daily_min = int(data.get('daily_minutes', 20))
+            focus = data.get('focus', 'speaking')
 
-            curriculum = curriculum_data.generate_curriculum(level, purpose, duration)
+            curriculum = curriculum_data.generate_curriculum(level, purpose, duration, focus)
             database.save_user_onboarding(user_id, level, purpose, duration, daily_min, curriculum)
 
             saved_curriculum = database.get_user_curriculum(user_id)
@@ -449,9 +489,10 @@ class LingovaRequestHandler(http.server.SimpleHTTPRequestHandler):
             data = self.read_json_body()
             prompt = data.get('prompt', '') or data.get('message', '')
             api_key = data.get('api_key', '')
-            model = data.get('model', 'gemini-1.5-flash')
+            history = data.get('history') or []
+            model = data.get('model', GEMINI_MODEL)
 
-            result = backend_ai_chat(prompt, api_key=api_key)
+            result = backend_ai_chat(prompt, history=history, api_key=api_key, model=model)
             return self.send_json(result)
 
         # 13. Chiqish
@@ -510,11 +551,26 @@ class LingovaRequestHandler(http.server.SimpleHTTPRequestHandler):
         elif path == '/api/grammar':
             return self.send_json({'success': True, 'grammar': curriculum_data.GRAMMAR_GUIDE})
 
+        elif path == '/api/ai/status':
+            return self.send_json({
+                'success': True,
+                'server_key': bool(GEMINI_API_KEY),
+                'model': GEMINI_MODEL
+            })
+
         elif path == '/api/leaderboard':
             # Faqat haqiqiy foydalanuvchilar!
             leaders = database.get_leaderboard()
             return self.send_json({'success': True, 'leaderboard': leaders})
 
+        elif path in ('/health', '/api/health'):
+            # Kuzatuvchi/monitor so'rovlari uchun yengil javob.
+            return self.send_json({
+                'success': True,
+                'status': 'ok',
+                'server_key': bool(GEMINI_API_KEY),
+                'model': GEMINI_MODEL
+            })
 
         else:
             if path == '/' or path == '':
@@ -524,7 +580,8 @@ class LingovaRequestHandler(http.server.SimpleHTTPRequestHandler):
 def run_server():
     os.chdir(BASE_DIR)
     database.init_db()
-    with socketserver.TCPServer(("", PORT), LingovaRequestHandler) as httpd:
+    server_class = getattr(http.server, "ThreadingHTTPServer", socketserver.TCPServer)
+    with server_class(("", PORT), LingovaRequestHandler) as httpd:
         print(f"==================================================")
         print(f"🚀 Lingova Backend API faol: http://localhost:{PORT}")
         print(f"Baza: lingova.db (SQLite)")

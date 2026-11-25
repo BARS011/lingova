@@ -291,6 +291,7 @@ def get_user_curriculum(user_id):
             "exercises": json.loads(r["exercises_json"]),
             "xp_reward": r["xp_reward"],
             "diamonds_reward": r["diamonds_reward"],
+            "tier_required": "free" if r["lesson_num"] <= 5 else "pro" if r["lesson_num"] <= 15 else "premium",
             "is_completed": bool(r["is_completed"]),
             "score": r["score"],
             "completed_at": r["completed_at"]
